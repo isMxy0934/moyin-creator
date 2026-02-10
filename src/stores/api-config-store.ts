@@ -8,7 +8,7 @@
  */
 
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import type { ProviderId, ServiceType } from '@opencut/ai-core';
 import { 
   type ModelCapability,
@@ -20,6 +20,7 @@ import {
   updateProviderKeys,
   classifyModelByName,
 } from '@/lib/api-key-manager';
+import { fileStorage } from '@/lib/indexed-db-storage';
 
 // Re-export IProvider for convenience
 export type { IProvider } from '@/lib/api-key-manager';
@@ -745,6 +746,7 @@ export const useAPIConfigStore = create<APIConfigStore>()(
     {
       name: 'opencut-api-config',  // localStorage key
       version: 7,  // v7: remove memefast default/bindings and keep provider config fully user-driven
+      storage: createJSONStorage(() => fileStorage),
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as (
           Partial<APIConfigState> & {
