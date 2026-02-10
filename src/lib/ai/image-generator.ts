@@ -28,6 +28,141 @@ export interface ImageGenerationResult {
   taskId?: string;
 }
 
+type ChatCompletionImageResponse = {
+  choices?: Array<{
+    message?: {
+      content?: unknown;
+      images?: unknown;
+    };
+  }>;
+  [key: string]: unknown;
+};
+
+function shortenForLog(value: unknown, maxLen = 220): unknown {
+  if (typeof value === 'string') {
+    return value.length > maxLen ? `${value.slice(0, maxLen)}...<truncated:${value.length}>` : value;
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 6).map((item) => shortenForLog(item, maxLen));
+  }
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    const entries = Object.entries(obj).slice(0, 20);
+    const next: Record<string, unknown> = {};
+    for (const [k, v] of entries) next[k] = shortenForLog(v, maxLen);
+    return next;
+  }
+  return value;
+}
+
+function formatLogJson(value: unknown, maxLen = 1800): string {
+  try {
+    const text = JSON.stringify(shortenForLog(value), null, 2);
+    return text.length > maxLen ? `${text.slice(0, maxLen)}...<truncated>` : text;
+  } catch {
+    return String(value);
+  }
+}
+
+function buildChatResponseDebugInfo(data: unknown) {
+  const root = data && typeof data === 'object' ? (data as Record<string, unknown>) : undefined;
+  const choices = Array.isArray(root?.choices) ? (root.choices as unknown[]) : [];
+  const choice = choices[0];
+  const choiceObj = choice && typeof choice === 'object' ? (choice as Record<string, unknown>) : undefined;
+  const message = choiceObj?.message;
+  const messageObj = message && typeof message === 'object' ? (message as Record<string, unknown>) : undefined;
+  const content = messageObj?.content;
+  const firstDataItem = Array.isArray(root?.data) ? (root?.data as unknown[])[0] : root?.data;
+
+  return {
+    topLevelKeys: root ? Object.keys(root) : [],
+    choicesCount: choices.length,
+    choiceKeys: choiceObj ? Object.keys(choiceObj) : [],
+    messageKeys: messageObj ? Object.keys(messageObj) : [],
+    messageImagesType: Array.isArray(messageObj?.images) ? 'array' : typeof messageObj?.images,
+    messageImagesFirstKeys:
+      Array.isArray(messageObj?.images) &&
+      messageObj.images[0] &&
+      typeof messageObj.images[0] === 'object'
+        ? Object.keys(messageObj.images[0] as Record<string, unknown>)
+        : [],
+    contentType: Array.isArray(content) ? 'array' : typeof content,
+    contentArrayPartTypes: Array.isArray(content)
+      ? content.slice(0, 6).map((part: unknown) => {
+          const partObj = part && typeof part === 'object' ? (part as Record<string, unknown>) : undefined;
+          return {
+            type: partObj?.type,
+            keys: partObj ? Object.keys(partObj) : [],
+          };
+        })
+      : [],
+    contentPreview: typeof content === 'string' ? content.slice(0, 500) : undefined,
+    dataType: Array.isArray(root?.data) ? 'array' : typeof root?.data,
+    dataFirstKeys:
+      firstDataItem && typeof firstDataItem === 'object'
+        ? Object.keys(firstDataItem)
+        : [],
+  };
+}
+
+function toImageDataUri(maybeBase64: unknown): string | undefined {
+  if (typeof maybeBase64 !== 'string') return undefined;
+  const value = maybeBase64.trim();
+  if (!value) return undefined;
+  if (value.startsWith('data:image/')) return value;
+  // Common base64 body without prefix
+  if (/^[A-Za-z0-9+/=\r\n]+$/.test(value) && value.length > 100) {
+    const compact = value.replace(/\s+/g, '');
+    return `data:image/png;base64,${compact}`;
+  }
+  return undefined;
+}
+
+function extractImageUrlFromUnknown(node: unknown): string | undefined {
+  if (!node) return undefined;
+
+  if (typeof node === 'string') {
+    if (node.startsWith('http://') || node.startsWith('https://') || node.startsWith('data:image/')) {
+      return node;
+    }
+    return toImageDataUri(node);
+  }
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const hit = extractImageUrlFromUnknown(item);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
+
+  if (typeof node !== 'object') return undefined;
+  const obj = node as Record<string, unknown>;
+
+  // Direct URL-like fields
+  const directKeys = ['url', 'image_url', 'imageUrl', 'output_url', 'outputUrl', 'src'];
+  for (const k of directKeys) {
+    const hit = extractImageUrlFromUnknown(obj[k]);
+    if (hit) return hit;
+  }
+
+  // Base64-like fields
+  const b64Keys = ['b64_json', 'base64', 'image_base64', 'imageBase64', 'data'];
+  for (const k of b64Keys) {
+    const hit = toImageDataUri(obj[k]);
+    if (hit) return hit;
+  }
+
+  // Nested common containers
+  const nestedKeys = ['image', 'images', 'content', 'result', 'payload'];
+  for (const k of nestedKeys) {
+    const hit = extractImageUrlFromUnknown(obj[k]);
+    if (hit) return hit;
+  }
+
+  return undefined;
+}
+
 const buildEndpoint = (baseUrl: string, path: string) => {
   const normalized = baseUrl.replace(/\/+$/, '');
   return /\/v\d+$/.test(normalized) ? `${normalized}/${path}` : `${normalized}/v1/${path}`;
@@ -94,14 +229,16 @@ async function generateImage(
   const endpointTypes = useAPIConfigStore.getState().modelEndpointTypes[model];
   const apiFormat = resolveImageApiFormat(endpointTypes, model);
 
-  console.log('[ImageGenerator] Generating image', {
-    model,
-    apiFormat,
-    endpointTypes,
-    aspectRatio,
-    resolution,
-    promptPreview: params.prompt.substring(0, 100) + '...',
-  });
+  console.log(
+    `[ImageGenerator] Generating image:\n${formatLogJson({
+      model,
+      apiFormat,
+      endpointTypes,
+      aspectRatio,
+      resolution,
+      promptPreview: params.prompt.substring(0, 100) + '...',
+    })}`
+  );
 
   // Gemini 等模型通过 chat completions 生图
   if (apiFormat === 'openai_chat') {
@@ -170,7 +307,14 @@ async function submitViaChatCompletions(
     max_tokens: 4096,
   };
 
-  console.log('[ImageGenerator] Submitting via chat completions:', { model, endpoint });
+  console.log(
+    `[ImageGenerator] Submitting via chat completions:\n${formatLogJson({
+      model,
+      endpoint,
+      hasReferenceImages: !!referenceImages?.length,
+      requestBodyPreview: requestBody,
+    })}`
+  );
 
   const response = await fetch(endpoint, {
     method: 'POST',
@@ -185,18 +329,45 @@ async function submitViaChatCompletions(
     const errorText = await response.text();
     console.error('[ImageGenerator] Chat completions error:', response.status, errorText);
     let msg = `图片生成 API 错误: ${response.status}`;
-    try { const j = JSON.parse(errorText); msg = j.error?.message || msg; } catch {}
+    try {
+      const j = JSON.parse(errorText) as { error?: { message?: string } };
+      msg = j.error?.message || msg;
+    } catch {
+      // Keep the default message when error body is not JSON.
+    }
     throw new Error(msg);
   }
 
-  const data = await response.json();
-  console.log('[ImageGenerator] Chat completions response received');
+  const rawText = await response.text();
+  let data: ChatCompletionImageResponse;
+  try {
+    data = JSON.parse(rawText) as ChatCompletionImageResponse;
+  } catch {
+    console.error(
+      `[ImageGenerator] Chat response is not valid JSON. Preview:\n${rawText.slice(0, 1200)}`
+    );
+    throw new Error('图片生成响应不是有效 JSON');
+  }
+
+  console.log(
+    `[ImageGenerator] Chat completions response received. Shape:\n${formatLogJson(
+      buildChatResponseDebugInfo(data)
+    )}`
+  );
 
   // Extract image from response - multiple possible formats
   const choice = data.choices?.[0];
   if (!choice) throw new Error('响应中无有效内容');
 
   const message = choice.message;
+  const messageObj =
+    message && typeof message === 'object' ? (message as Record<string, unknown>) : undefined;
+
+  // Format 0: Gemini/OpenRouter style puts images in message.images
+  const fromMessageImages = extractImageUrlFromUnknown(messageObj?.images);
+  if (fromMessageImages) {
+    return { imageUrl: fromMessageImages };
+  }
 
   // Format 1: content is array with image parts (OpenAI multimodal)
   if (Array.isArray(message?.content)) {
@@ -225,6 +396,18 @@ async function submitViaChatCompletions(
     if (b64Match) return { imageUrl: b64Match[1] };
   }
 
+  // Format 3: content is object / nested container with url or base64 fields
+  const fromContentObject = extractImageUrlFromUnknown(messageObj?.content);
+  if (fromContentObject) {
+    return { imageUrl: fromContentObject };
+  }
+
+  console.error(
+    `[ImageGenerator] Failed to extract image URL from chat response. Debug:\n${formatLogJson({
+      shape: buildChatResponseDebugInfo(data),
+      rawTextPreview: rawText.slice(0, 1200),
+    })}`
+  );
   throw new Error('未能从响应中提取图片 URL');
 }
 
@@ -512,7 +695,7 @@ export async function submitGridImageRequest(params: {
   }
 
   // 标准格式: { data: [{ url, task_id }] }
-  const normalizeUrl = (url: any): string | undefined => {
+  const normalizeUrl = (url: unknown): string | undefined => {
     if (!url) return undefined;
     if (Array.isArray(url)) return url[0] || undefined;
     if (typeof url === 'string') return url;
