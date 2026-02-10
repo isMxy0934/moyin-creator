@@ -108,7 +108,6 @@ const DEFAULT_PLATFORM_CAPABILITIES: Record<string, ModelCapability[]> = {
   juxinapi: ["image_generation", "video_generation"],
   dik3: ["text", "function_calling", "reasoning"],
   nanohajimi: ["text", "vision", "image_generation", "video_generation"],
-  memefast: ["text", "vision", "image_generation", "video_generation"],
   // RunningHub is used for specialized tools; do not expose it as a default vision/chat provider.
   runninghub: ["image_generation"],
 };
@@ -344,10 +343,8 @@ export function FeatureBindingPanel() {
         groupMap.get(opt.platform)!.options.push(opt);
       }
 
-      // 排序：魔因API 优先 → 已配置的 → 其他按名称
+      // 排序：已配置的优先，其余按名称
       const sorted = [...groupMap.values()].sort((a, b) => {
-        if (a.platform === 'memefast') return -1;
-        if (b.platform === 'memefast') return 1;
         const aConf = configuredPlatforms.has(a.platform);
         const bConf = configuredPlatforms.has(b.platform);
         if (aConf !== bConf) return aConf ? -1 : 1;
@@ -366,14 +363,13 @@ export function FeatureBindingPanel() {
   const isGroupExpanded = (featureKey: string, platform: string): boolean => {
     const key = `${featureKey}:${platform}`;
     if (key in groupExpandState) return groupExpandState[key];
-    // 默认：魔因API 展开，其他折叠
-    return platform === 'memefast';
+    return false;
   };
 
   const toggleGroup = (featureKey: string, platform: string) => {
     const key = `${featureKey}:${platform}`;
     setGroupExpandState(prev => {
-      const currentlyExpanded = key in prev ? prev[key] : platform === 'memefast';
+      const currentlyExpanded = key in prev ? prev[key] : false;
       return { ...prev, [key]: !currentlyExpanded };
     });
   };
@@ -509,11 +505,6 @@ export function FeatureBindingPanel() {
                                 )}
                               />
                               <span className="text-sm font-medium">{group.name}</span>
-                              {group.platform === 'memefast' && (
-                                <span className="text-[10px] px-1.5 py-0.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded">
-                                  推荐
-                                </span>
-                              )}
                               <span className="text-xs text-muted-foreground ml-auto">
                                 {selectedInGroup > 0 && (
                                   <span className="text-primary mr-2">{selectedInGroup} 已选</span>

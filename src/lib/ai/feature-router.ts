@@ -36,60 +36,6 @@ export interface FeatureConfig {
 const featureRoundRobinIndex: Map<AIFeature, number> = new Map();
 
 /**
- * Default mapping for features to platforms (fallback when not explicitly bound)
- */
-const FEATURE_PLATFORM_MAP: Partial<Record<AIFeature, string>> = {
-  script_analysis: 'memefast',
-  character_generation: 'memefast',
-  video_generation: 'memefast',
-  image_understanding: 'memefast',
-  chat: 'memefast',
-};
-
-
-/**
- * 解析 platform:model 格式
- */
-function parseBindingValue(binding: string): { platform: string; model?: string } | null {
-  if (binding.includes(':')) {
-    const [platform, model] = binding.split(':');
-    return { platform, model };
-  }
-  return null;
-}
-
-/**
- * Get the platform and model from featureBindings (first binding)
- * featureBindings now stores: string[] (array of platform:model)
- * 这个函数仅用于兼容旧代码，新代码应使用 getProvidersForFeature
- */
-function getBoundPlatformAndModel(store: ReturnType<typeof useAPIConfigStore.getState>, feature: AIFeature): { platform: string; model?: string } | null {
-  const bindings = store.getFeatureBindings(feature);
-  if (!bindings || bindings.length === 0) return null;
-  
-  // 取第一个绑定
-  const binding = bindings[0];
-  if (!binding) return null;
-  
-  // 新格式: platform:model
-  const parsed = parseBindingValue(binding);
-  if (parsed) {
-    return parsed;
-  }
-  
-  // 兼容旧格式: provider ID
-  const provider = store.providers.find(p => p.id === binding);
-  if (provider) return { platform: provider.platform };
-  
-  // 兼容旧格式: platform name
-  const providerByPlatform = store.providers.find(p => p.platform === binding);
-  if (providerByPlatform) return { platform: providerByPlatform.platform };
-  
-  // It might be a platform name that's not yet added
-  return { platform: binding };
-}
-
-/**
  * 获取功能的所有可用配置（多模型）
  */
 export function getAllFeatureConfigs(feature: AIFeature): FeatureConfig[] {
@@ -132,32 +78,6 @@ export function getFeatureConfig(feature: AIFeature): FeatureConfig | null {
   const configs = getAllFeatureConfigs(feature);
   
   if (configs.length === 0) {
-    // Fallback: 尝试使用默认平台映射
-    const store = useAPIConfigStore.getState();
-    const defaultPlatform = FEATURE_PLATFORM_MAP[feature];
-    if (defaultPlatform) {
-      const provider = store.providers.find(p => p.platform === defaultPlatform);
-      if (provider) {
-        const keys = parseApiKeys(provider.apiKey);
-        if (keys.length > 0) {
-          const keyManager = getProviderKeyManager(provider.id, provider.apiKey);
-          const featureInfo = AI_FEATURES.find(f => f.key === feature);
-          const model = provider.model?.[0] || '';
-          return {
-            feature,
-            featureName: featureInfo?.name || feature,
-            provider,
-            apiKey: keyManager.getCurrentKey() || keys[0],
-            allApiKeys: keys,
-            keyManager,
-            platform: provider.platform,
-            baseUrl: provider.baseUrl,
-            models: provider.model || [],
-            model,
-          };
-        }
-      }
-    }
     console.warn(`[FeatureRouter] No provider bound for feature: ${feature}`);
     return null;
   }

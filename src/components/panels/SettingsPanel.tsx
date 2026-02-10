@@ -69,7 +69,6 @@ import {
   Download,
   RefreshCw,
   Upload,
-  ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -84,7 +83,6 @@ const PLATFORM_ICONS: Record<string, React.ReactNode> = {
   juxinapi: <Zap className="h-5 w-5" />,
   dik3: <MessageSquare className="h-5 w-5" />,
   nanohajimi: <Zap className="h-5 w-5" />,
-  memefast: <Zap className="h-5 w-5" />,
   openai: <MessageSquare className="h-5 w-5" />,
   deepseek: <MessageSquare className="h-5 w-5" />,
   custom: <Settings className="h-5 w-5" />,
@@ -558,33 +556,6 @@ export function SettingsPanel() {
             </div>
           </div>
 
-          {/* MemeFast 购买引导 */}
-          <a
-            href="https://memefast.top"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-3 p-4 bg-gradient-to-r from-orange-500/5 to-primary/5 border border-orange-500/20 rounded-lg hover:border-orange-500/40 transition-colors group"
-          >
-            <div className="p-2 rounded-lg bg-orange-500/10 text-orange-500 shrink-0">
-              <Zap className="h-5 w-5" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="font-medium text-foreground text-sm flex items-center gap-2">
-                魔因API
-                <span className="text-[10px] px-1.5 py-0.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded">
-                  推荐
-                </span>
-              </h3>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                543+ AI 模型一站式接入，支持 GPT / Claude / Gemini / DeepSeek / Sora 等
-              </p>
-            </div>
-            <span className="shrink-0 inline-flex items-center gap-1.5 text-xs font-medium text-primary group-hover:underline">
-              获取 API Key
-              <ExternalLink className="h-3.5 w-3.5" />
-            </span>
-          </a>
-
           {/* Feature Binding */}
           <FeatureBindingPanel />
 
@@ -601,18 +572,6 @@ export function SettingsPanel() {
                 <h3 className="text-lg font-medium text-foreground mb-2">
                   尚未配置任何供应商
                 </h3>
-                <p className="text-sm text-muted-foreground mb-2">
-                  推荐使用魔因API，支持 543+ 模型一站式接入
-                </p>
-                <a
-                  href="https://memefast.top"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline mb-4"
-                >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                  前往魔因API获取 Key
-                </a>
                 <Button onClick={() => setAddDialogOpen(true)}>
                   <Plus className="h-4 w-4 mr-1" />
                   添加供应商
@@ -660,11 +619,6 @@ export function SettingsPanel() {
                               <div className="text-left">
                                 <h4 className="font-medium text-foreground flex items-center gap-2">
                                   {provider.name}
-                                  {provider.platform === 'memefast' && (
-                                    <span className="text-[10px] px-1.5 py-0.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 rounded font-normal">
-                                      推荐
-                                    </span>
-                                  )}
                                   {configured && (
                                     <span className="text-[10px] px-1.5 py-0.5 bg-primary/10 text-primary rounded font-normal">
                                       已配置
@@ -797,21 +751,6 @@ export function SettingsPanel() {
                             </div>
                           </div>
                         </CollapsibleTrigger>
-
-                        {/* MemeFast 购买引导 */}
-                        {provider.platform === 'memefast' && !configured && (
-                          <div className="px-4 pb-2">
-                            <a
-                              href="https://memefast.top"
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
-                            >
-                              <ExternalLink className="h-3 w-3" />
-                              前往魔因API获取 Key →
-                            </a>
-                          </div>
-                        )}
 
                         {/* Expandable Content */}
                         <CollapsibleContent>

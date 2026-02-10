@@ -30,40 +30,10 @@ export interface IProvider {
 }
 
 /**
- * Default provider templates - matching OpenCut original exactly
- * 默认供应商模板 - 完全与 OpenCut 原版一致
- * 
- * 只有 3 个核心供应商（来自 director_ai 配置）：
- * 1. 智谱 GLM-4.7 - 对话/剧本分析 (glm-4.7 无图, glm-4.6v 有图)
- * 2. APIMart - Gemini 图片生成 (gemini-3-pro-image-preview) / 豆包视频生成 (doubao-seedance-1-5-pro)
- * 3. 豆包 ARK - 图片识别/理解
- * 
- * API 端点参考：
- * - 智谱: https://open.bigmodel.cn/api/paas/v4/chat/completions
- * - APIMart 图片: https://api.apimart.ai/v1/images/generations
- * - APIMart 视频: https://api.apimart.ai/v1/videos/generations
- * - APIMart 聊天: https://api.apimart.ai/v1/chat/completions
+ * Default provider templates.
+ * 仅用于兼容旧数据迁移和初始化兜底，不代表 UI 中的固定供应商列表。
  */
 export const DEFAULT_PROVIDERS: Omit<IProvider, 'id' | 'apiKey'>[] = [
-  {
-    platform: 'memefast',
-    name: '魔因API',
-    baseUrl: 'https://memefast.top',
-    model: [
-      'deepseek-v3.2',
-      'glm-4.7',
-      'gemini-3-pro-preview',
-      'gemini-3-pro-image-preview',
-      'gpt-image-1.5',
-      'doubao-seedance-1-5-pro-251215',
-      'veo3.1',
-      'sora-2-all',
-      'wan2.6-i2v',
-      'grok-video-3-10s',
-      'claude-haiku-4-5-20251001',
-    ],
-    capabilities: ['text', 'vision', 'image_generation', 'video_generation'],
-  },
   {
     platform: 'runninghub',
     name: 'RunningHub',

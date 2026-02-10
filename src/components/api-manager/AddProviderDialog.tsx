@@ -51,27 +51,6 @@ const PLATFORM_PRESETS: Array<{
   recommended?: boolean;
 }> = [
   {
-    platform: "memefast",
-    name: "魔因API",
-    baseUrl: "https://memefast.top",
-    description: "543+ 模型中转，支持 GPT/Claude/Gemini/DeepSeek/Veo/Sora 等",
-    services: ["对话", "图片生成", "视频生成", "图片理解"],
-    models: [
-      "deepseek-v3.2",
-      "glm-4.7",
-      "gemini-3-pro-preview",
-      "gemini-3-pro-image-preview",
-      "gpt-image-1.5",
-      "doubao-seedance-1-5-pro-251215",
-      "veo3.1",
-      "sora-2-all",
-      "wan2.6-i2v",
-      "grok-video-3-10s",
-      "claude-haiku-4-5-20251001",
-    ],
-    recommended: true,
-  },
-  {
     platform: "zhipu",
     name: "智谱 GLM-4.7",
     baseUrl: "https://open.bigmodel.cn/api/paas/v4",

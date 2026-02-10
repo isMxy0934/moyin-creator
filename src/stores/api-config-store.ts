@@ -11,6 +11,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ProviderId, ServiceType } from '@opencut/ai-core';
 import { 
+  type ModelCapability,
   type IProvider, 
   DEFAULT_PROVIDERS, 
   generateId, 
@@ -232,7 +233,7 @@ interface APIConfigActions {
   
   // Display helpers
   maskApiKey: (key: string) => string;
-  getAllConfigs: () => { provider: ProviderId; configured: boolean; masked: string }[];
+  getAllConfigs: () => { provider: string; configured: boolean; masked: string }[];
 }
 
 type APIConfigStore = APIConfigState & APIConfigActions;
@@ -245,26 +246,34 @@ export interface APIConfigStatus {
   friendlyMessage: string;
 }
 
-// ==================== Provider Info ====================
+// ==================== Service Capability ====================
 
-/**
- * Provider info matching OpenCut original exactly (director_ai configuration)
- * 供应商信息 - 完全与 OpenCut 原版一致
- * 
- * 只有 3 个核心供应商（来自 director_ai 配置）：
- * 1. zhipu - 智谱 GLM-4.7，用于对话/剧本 (glm-4.7, glm-4.6v 视觉)
- * 2. apimart - APIMart (https://api.apimart.ai)，用于图片和视频生成
- *    - 图片: gemini-3-pro-image-preview
- *    - 视频: doubao-seedance-1-5-pro
- *    - 聊天: gemini-2.0-flash
- * 3. doubao - 豆包 ARK，用于图片理解
- */
-const PROVIDER_INFO: Record<ProviderId, { name: string; services: ServiceType[] }> = {
-  memefast: { name: '魔因API', services: ['chat', 'image', 'video', 'vision'] },
-  runninghub: { name: 'RunningHub', services: ['image', 'vision'] },
-  openai: { name: 'OpenAI', services: [] },
-  custom: { name: 'Custom', services: [] },
+const SERVICE_LABEL_MAP: Record<ServiceType, string> = {
+  chat: '对话',
+  image: '图片生成',
+  video: '视频生成',
+  vision: '图片理解',
 };
+
+const SERVICE_CAPABILITY_MAP: Record<ServiceType, ModelCapability> = {
+  chat: 'text',
+  image: 'image_generation',
+  video: 'video_generation',
+  vision: 'vision',
+};
+
+function providerSupportsService(provider: IProvider, service: ServiceType): boolean {
+  const requiredCapability = SERVICE_CAPABILITY_MAP[service];
+  if (!requiredCapability) return false;
+
+  if (provider.capabilities?.includes(requiredCapability)) {
+    return true;
+  }
+
+  return provider.model.some((model) =>
+    classifyModelByName(model).includes(requiredCapability)
+  );
+}
 
 // ==================== Initial State ====================
 
@@ -283,13 +292,8 @@ const defaultImageHostProviders: ImageHostProvider[] = DEFAULT_IMAGE_HOST_PROVID
   apiKey: '',
 }));
 
-// Pre-fill MemeFast for new users (no API Key, just the provider entry)
-const memefastTemplate = DEFAULT_PROVIDERS.find(p => p.platform === 'memefast');
-
 const initialState: APIConfigState = {
-  providers: memefastTemplate
-    ? [{ id: generateId(), ...memefastTemplate, apiKey: '' }]
-    : [],
+  providers: [],
   featureBindings: defaultFeatureBindings,
   apiKeys: {},
   concurrency: 1,  // Default to serial execution (single key rate limit)
@@ -692,17 +696,17 @@ export const useAPIConfigStore = create<APIConfigStore>()(
       },
 
       checkRequiredKeys: (services) => {
+        const configuredProviders = get().providers.filter(
+          (provider) => parseApiKeys(provider.apiKey).length > 0
+        );
         const missing: string[] = [];
-        const { isConfigured } = get();
 
         for (const service of services) {
-          // Find provider for this service
-          for (const [providerId, info] of Object.entries(PROVIDER_INFO)) {
-            if (info.services.includes(service) && !isConfigured(providerId as ProviderId)) {
-              if (!missing.includes(info.name)) {
-                missing.push(info.name);
-              }
-            }
+          const matched = configuredProviders.some((provider) =>
+            providerSupportsService(provider, service)
+          );
+          if (!matched) {
+            missing.push(SERVICE_LABEL_MAP[service] || service);
           }
         }
 
@@ -711,7 +715,7 @@ export const useAPIConfigStore = create<APIConfigStore>()(
           missingKeys: missing,
           friendlyMessage: missing.length === 0
             ? '所有 API Key 已配置'
-            : `缺少以下 API Key：${missing.join('、')}`,
+            : `缺少以下能力配置：${missing.join('、')}`,
         };
       },
 
@@ -730,19 +734,24 @@ export const useAPIConfigStore = create<APIConfigStore>()(
       },
 
       getAllConfigs: () => {
-        const { apiKeys, maskApiKey, isConfigured } = get();
-        return (Object.keys(PROVIDER_INFO) as ProviderId[]).map((provider) => ({
-          provider,
-          configured: isConfigured(provider),
-          masked: maskApiKey(apiKeys[provider] || ''),
+        const { providers, maskApiKey } = get();
+        return providers.map((provider) => ({
+          provider: provider.platform,
+          configured: parseApiKeys(provider.apiKey).length > 0,
+          masked: maskApiKey(parseApiKeys(provider.apiKey)[0] || ''),
         }));
       },
     }),
     {
       name: 'opencut-api-config',  // localStorage key
-      version: 6,  // v6: featureBindings multi-select (string -> string[])
+      version: 7,  // v7: remove memefast default/bindings and keep provider config fully user-driven
       migrate: (persistedState: unknown, version: number) => {
-        const state = persistedState as Partial<APIConfigState> & { imageHostConfig?: LegacyImageHostConfig } | undefined;
+        const state = persistedState as (
+          Partial<APIConfigState> & {
+            imageHostConfig?: LegacyImageHostConfig;
+            imageHostProviders?: ImageHostProvider[];
+          }
+        ) | undefined;
         console.log(`[APIConfig] Migrating from version ${version}`);
         
         // Default feature bindings for migration
@@ -756,7 +765,7 @@ export const useAPIConfigStore = create<APIConfigStore>()(
         };
         const resolveImageHostProviders = (): ImageHostProvider[] => {
           const legacyConfig = state?.imageHostConfig;
-          let imageHostProviders: ImageHostProvider[] = (state as any)?.imageHostProviders || [];
+          let imageHostProviders: ImageHostProvider[] = state?.imageHostProviders || [];
 
           if (!imageHostProviders || imageHostProviders.length === 0) {
             if (legacyConfig) {
@@ -807,6 +816,23 @@ export const useAPIConfigStore = create<APIConfigStore>()(
 
           return imageHostProviders;
         };
+
+        const removeMemefastProviders = (providers: IProvider[] | undefined): IProvider[] => {
+          return (providers || []).filter((provider) => provider.platform !== 'memefast');
+        };
+
+        const removeMemefastBindings = (bindings: FeatureBindings): FeatureBindings => {
+          const cleaned: FeatureBindings = { ...defaultBindings };
+          for (const [key, value] of Object.entries(bindings)) {
+            const feature = key as AIFeature;
+            const values = Array.isArray(value) ? value : typeof value === 'string' ? [value] : [];
+            const filtered = values.filter(
+              (binding) => binding !== 'memefast' && !binding.startsWith('memefast:')
+            );
+            cleaned[feature] = filtered.length > 0 ? filtered : null;
+          }
+          return cleaned;
+        };
         
         // v1 -> v2: Migrate apiKeys to providers
         if (version === 1 || version === 0) {
@@ -827,8 +853,8 @@ export const useAPIConfigStore = create<APIConfigStore>()(
           
           return {
             ...state,
-            providers,
-            featureBindings: defaultBindings,
+            providers: removeMemefastProviders(providers),
+            featureBindings: removeMemefastBindings(defaultBindings),
             imageHostProviders: resolveImageHostProviders(),
             // Keep apiKeys for backward compat
             apiKeys: oldApiKeys,
@@ -865,8 +891,8 @@ export const useAPIConfigStore = create<APIConfigStore>()(
           
           return {
             ...state,
-            providers,
-            featureBindings: mergedBindings,
+            providers: removeMemefastProviders(providers),
+            featureBindings: removeMemefastBindings(mergedBindings),
             imageHostProviders: resolveImageHostProviders(),
           };
         }
@@ -892,8 +918,8 @@ export const useAPIConfigStore = create<APIConfigStore>()(
 
           return {
             ...state,
-            providers,
-            featureBindings: mergedBindings,
+            providers: removeMemefastProviders(providers),
+            featureBindings: removeMemefastBindings(mergedBindings),
             imageHostProviders: resolveImageHostProviders(),
           };
         }
@@ -921,7 +947,8 @@ export const useAPIConfigStore = create<APIConfigStore>()(
           
           return {
             ...state,
-            featureBindings: newBindings,
+            providers: removeMemefastProviders(state?.providers),
+            featureBindings: removeMemefastBindings(newBindings),
             imageHostProviders: resolveImageHostProviders(),
           };
         }
@@ -930,7 +957,8 @@ export const useAPIConfigStore = create<APIConfigStore>()(
         if (!state?.featureBindings) {
           return {
             ...state,
-            featureBindings: defaultBindings,
+            providers: removeMemefastProviders(state?.providers),
+            featureBindings: removeMemefastBindings(defaultBindings),
             imageHostProviders: resolveImageHostProviders(),
           };
         }
@@ -950,7 +978,8 @@ export const useAPIConfigStore = create<APIConfigStore>()(
         
         return {
           ...state,
-          featureBindings: mergedBindings,
+          providers: removeMemefastProviders(state?.providers),
+          featureBindings: removeMemefastBindings(mergedBindings),
           imageHostProviders: resolveImageHostProviders(),
         };
       },
