@@ -363,6 +363,47 @@ electron.ipcMain.handle("save-image", async (_event, { url, category, filename }
     return { success: false, error: String(error) };
   }
 });
+electron.ipcMain.handle("http-proxy-fetch", async (_event, payload) => {
+  try {
+    const target = new URL(payload.url);
+    if (target.protocol !== "http:" && target.protocol !== "https:") {
+      return {
+        ok: false,
+        status: 0,
+        statusText: "Invalid protocol",
+        headers: {},
+        body: "",
+        error: "Only http/https URLs are allowed"
+      };
+    }
+    const response = await fetch(payload.url, {
+      method: payload.method || "GET",
+      headers: payload.headers,
+      body: payload.body
+    });
+    const text = await response.text();
+    const headers = {};
+    response.headers.forEach((value, key) => {
+      headers[key] = value;
+    });
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+      body: text
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      statusText: "Network Error",
+      headers: {},
+      body: "",
+      error: error instanceof Error ? error.message : String(error)
+    };
+  }
+});
 electron.ipcMain.handle("get-image-path", async (_event, localPath) => {
   const match = localPath.match(/^local-image:\/\/(.+)\/(.+)$/);
   if (!match) return null;
