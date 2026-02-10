@@ -12,6 +12,48 @@ const MAIN_DIST = path.join(__dirname);
 const RENDERER_DIST = path.join(__dirname, "../renderer");
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
 let win;
+async function canReachUrl(rawUrl, timeoutMs = 1500) {
+  return await new Promise((resolve) => {
+    try {
+      const target = new URL(rawUrl);
+      const client = target.protocol === "https:" ? https : http;
+      const req = client.get(rawUrl, (res) => {
+        res.resume();
+        resolve(true);
+      });
+      req.setTimeout(timeoutMs, () => {
+        req.destroy(new Error("timeout"));
+        resolve(false);
+      });
+      req.on("error", () => resolve(false));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+async function resolveRendererEntry() {
+  if (electron.app.isPackaged) {
+    return { mode: "file" };
+  }
+  const candidates = [
+    VITE_DEV_SERVER_URL,
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
+    "http://localhost:5173",
+    "http://localhost:5174"
+  ].filter((u) => Boolean(u));
+  for (const url of candidates) {
+    if (await canReachUrl(url)) {
+      return { mode: "url", target: url };
+    }
+  }
+  return {
+    mode: "error",
+    message: `开发模式未检测到可用渲染服务。
+候选地址: ${candidates.join(", ") || "无"}
+请确认 npm run dev 的 Vite 服务已启动。`
+  };
+}
 function createWindow() {
   win = new electron.BrowserWindow({
     title: "魔因漫创",
@@ -24,7 +66,20 @@ function createWindow() {
     }
   });
   win.webContents.on("did-finish-load", () => {
+    console.log("[Electron] did-finish-load:", win?.webContents.getURL());
     win?.webContents.send("main-process-message", (/* @__PURE__ */ new Date()).toLocaleString());
+  });
+  win.webContents.on("did-start-loading", () => {
+    console.log("[Electron] did-start-loading");
+  });
+  win.webContents.on("did-stop-loading", () => {
+    console.log("[Electron] did-stop-loading");
+  });
+  win.webContents.on("did-fail-load", (_event, code, description, validatedURL) => {
+    console.error("[Electron] did-fail-load:", { code, description, validatedURL });
+  });
+  win.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    console.log(`[Renderer:${level}] ${sourceId}:${line} ${message}`);
   });
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith("http://") || url.startsWith("https://")) {
@@ -38,11 +93,30 @@ function createWindow() {
     event.preventDefault();
     electron.shell.openExternal(url);
   });
-  if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL);
-  } else {
-    win.loadFile(path.join(RENDERER_DIST, "index.html"));
-  }
+  console.log("[Electron] app.isPackaged=", electron.app.isPackaged, "VITE_DEV_SERVER_URL=", VITE_DEV_SERVER_URL || "(empty)");
+  void (async () => {
+    const entry = await resolveRendererEntry();
+    if (entry.mode === "url") {
+      console.log("[Electron] Loading renderer URL:", entry.target);
+      await win?.loadURL(entry.target);
+      return;
+    }
+    if (entry.mode === "file") {
+      const filePath = path.join(RENDERER_DIST, "index.html");
+      console.log("[Electron] Loading renderer file:", filePath);
+      await win?.loadFile(filePath);
+      return;
+    }
+    const html = `
+      <html><body style="font-family:-apple-system,Segoe UI,sans-serif;padding:24px;background:#111;color:#eee;">
+      <h2>Renderer Failed To Start</h2>
+      <pre style="white-space:pre-wrap;line-height:1.5;">${entry.message}</pre>
+      </body></html>
+    `;
+    await win?.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  })().catch((err) => {
+    console.error("[Electron] Failed to load renderer entry:", err);
+  });
 }
 electron.app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
