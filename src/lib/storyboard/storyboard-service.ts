@@ -8,10 +8,11 @@
  * For Electron desktop app: directly calls external APIs (APIMart/Zhipu)
  */
 
-import { buildStoryboardPrompt, getDefaultNegativePrompt, type StoryboardPromptConfig, type CharacterInfo } from './prompt-builder';
+import { buildStoryboardPrompt, type StoryboardPromptConfig, type CharacterInfo } from './prompt-builder';
 import { calculateGrid, type AspectRatio, type Resolution, RESOLUTION_PRESETS } from './grid-calculator';
 import { retryOperation } from "@/lib/utils/retry";
 import { delay, RATE_LIMITS } from "@/lib/utils/rate-limiter";
+import { submitGridImageRequest } from '@/lib/ai/image-generator';
 
 export interface StoryboardGenerationConfig {
   storyPrompt: string;
@@ -64,14 +65,6 @@ async function submitApimartImageTask(
   }
   const actualModel = model;
   const actualBaseUrl = baseUrl.replace(/\/+$/, '');
-  
-  const requestData: Record<string, unknown> = {
-    model: actualModel,
-    prompt,
-    n: 1,
-    size: aspectRatio,
-    resolution: resolution,
-  };
 
   if (referenceImages && referenceImages.length > 0) {
     console.log('[StoryboardService] Reference images:', referenceImages.map((img, i) => ({
@@ -80,106 +73,38 @@ async function submitApimartImageTask(
       isUrl: img.startsWith('http'),
       length: img.length,
     })));
-    requestData.image_urls = referenceImages;
   }
 
-  const requestBody = JSON.stringify(requestData);
   console.log('[StoryboardService] Submitting image generation:', {
-    model: requestData.model,
-    size: requestData.size,
-    resolution: requestData.resolution,
-    hasImageUrls: !!requestData.image_urls,
+    model: actualModel,
+    aspectRatio,
+    resolution,
+    hasImageUrls: !!referenceImages?.length,
     promptPreview: prompt.substring(0, 100),
   });
 
-  const controller = new AbortController();
-  // 120 seconds timeout for image generation (some services are slow)
-  const timeoutId = setTimeout(() => controller.abort(), 120000);
+  // Reuse unified grid-image router:
+  // - Gemini image models => /v1/chat/completions
+  // - Standard image models => /v1/images/generations
+  const result = await submitGridImageRequest({
+    model: actualModel,
+    prompt,
+    apiKey,
+    baseUrl: actualBaseUrl,
+    aspectRatio,
+    resolution,
+    referenceImages,
+  });
 
-  try {
-    // Use retry wrapper for 429 rate limit handling
-    const data = await retryOperation(async () => {
-    const endpoint = buildEndpoint(actualBaseUrl, 'images/generations');
-    const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: requestBody,
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[StoryboardService] Image API error:', response.status, errorText);
-
-        let errorMessage = `图片生成 API 错误: ${response.status}`;
-        try {
-          const errorJson = JSON.parse(errorText);
-          errorMessage = errorJson.error?.message || errorJson.message || errorJson.msg || errorMessage;
-        } catch {
-          if (errorText && errorText.length < 200) {
-            errorMessage = errorText;
-          }
-        }
-
-        if (response.status === 401 || response.status === 403) {
-          throw new Error('API Key 无效或已过期，请检查配置');
-        } else if (response.status >= 500) {
-          throw new Error('图片生成服务暂时不可用，请稍后再试');
-        }
-
-        // Create error with status for retry logic
-        const error = new Error(errorMessage) as Error & { status?: number };
-        error.status = response.status;
-        throw error;
-      }
-
-      return response.json();
-    }, {
-      maxRetries: 3,
-      baseDelay: 3000,
-      retryOn429: true,
-    });
-
-    clearTimeout(timeoutId);
-    console.log('[StoryboardService] Image API response:', data);
-
-    // Parse response
-    let taskId: string | undefined;
-    const dataList = data.data;
-    if (Array.isArray(dataList) && dataList.length > 0) {
-      taskId = dataList[0].task_id?.toString();
-    }
-    taskId = taskId || data.task_id?.toString();
-
-    // Check for synchronous result
-    if (!taskId) {
-      const directUrl = data.data?.[0]?.url || data.url;
-      if (directUrl) {
-        return {
-          imageUrl: directUrl,
-          estimatedTime: 0,
-        };
-      }
-      throw new Error('No task_id or image URL in response');
-    }
-
-    return {
-      taskId,
-      estimatedTime: data.estimated_time || 30,
-    };
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error instanceof Error) {
-      if (error.name === 'AbortError') {
-        throw new Error('图片生成 API 请求超时，请稍后再试');
-      }
-      throw error;
-    }
-    throw new Error('调用图片生成 API 时发生未知错误');
+  if (!result.taskId && !result.imageUrl) {
+    throw new Error('No task_id or image URL in response');
   }
+
+  return {
+    taskId: result.taskId,
+    imageUrl: result.imageUrl,
+    estimatedTime: result.taskId ? 30 : 0,
+  };
 }
 
 /**
@@ -400,7 +325,6 @@ export async function generateStoryboardImage(
   };
 
   const prompt = buildStoryboardPrompt(promptConfig);
-  const negativePrompt = getDefaultNegativePrompt();
 
   console.log('[StoryboardService] Generated prompt:', prompt.substring(0, 200));
   console.log('[StoryboardService] Grid config:', gridConfig);

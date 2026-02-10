@@ -6,6 +6,97 @@ import { saveVideoToLocal } from "@/lib/image-storage";
 import { normalizeUrl } from "./use-image-generation";
 import { useAPIConfigStore } from "@/stores/api-config-store";
 
+type HttpProxyResponse = {
+  ok: boolean
+  status: number
+  statusText: string
+  headers: Record<string, string>
+  body: string
+  error?: string
+}
+
+type MinimalResponse = {
+  ok: boolean
+  status: number
+  statusText: string
+  text: () => Promise<string>
+  json: <T = unknown>() => Promise<T>
+}
+
+function headersToRecord(headers?: HeadersInit): Record<string, string> {
+  if (!headers) return {}
+
+  const out: Record<string, string> = {}
+  if (headers instanceof Headers) {
+    headers.forEach((value, key) => { out[key] = value })
+    return out
+  }
+  if (Array.isArray(headers)) {
+    for (const [key, value] of headers) {
+      out[key] = String(value)
+    }
+    return out
+  }
+
+  for (const [key, value] of Object.entries(headers)) {
+    out[key] = String(value)
+  }
+  return out
+}
+
+function isHttpUrl(url: string): boolean {
+  return /^https?:\/\//i.test(url)
+}
+
+async function httpFetch(url: string, init?: RequestInit): Promise<MinimalResponse> {
+  const canUseMainProxy =
+    typeof window !== 'undefined'
+    && isHttpUrl(url)
+    && !!window.ipcRenderer?.invoke
+
+  const body = init?.body
+  const hasUnsupportedBody = body !== undefined && typeof body !== 'string' && !(body instanceof URLSearchParams)
+
+  if (!canUseMainProxy || hasUnsupportedBody) {
+    const response = await fetch(url, init)
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      text: async () => response.text(),
+      json: async <T = unknown>() => response.json() as Promise<T>,
+    }
+  }
+
+  let response: HttpProxyResponse
+  try {
+    response = await window.ipcRenderer.invoke('http-proxy-fetch', {
+      url,
+      method: init?.method || 'GET',
+      headers: headersToRecord(init?.headers),
+      body: typeof body === 'string' ? body : (body instanceof URLSearchParams ? body.toString() : undefined),
+    }) as HttpProxyResponse
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (message.includes("No handler registered for 'http-proxy-fetch'")) {
+      throw new Error('主进程未加载最新版本（缺少 http-proxy-fetch 处理器）。请完全重启应用或重启 `npm run dev` 后重试。')
+    }
+    throw error
+  }
+
+  if (response.status === 0 && response.error) {
+    throw new Error(response.error)
+  }
+
+  return {
+    ok: response.ok,
+    status: response.status,
+    statusText: response.statusText,
+    text: async () => response.body,
+    json: async <T = unknown>() => JSON.parse(response.body) as T,
+  }
+}
+
 // ==================== Content Moderation ====================
 
 /**
@@ -285,7 +376,7 @@ async function callUnifiedVideoApi(
 
   console.log('[VideoGen] Unified format → POST /v1/video/create', { model, aspect_ratio: aspectRatio, size: requestBody.size });
 
-  const submitResponse = await fetch(`${baseUrl}/v1/video/create`, {
+  const submitResponse = await httpFetch(`${baseUrl}/v1/video/create`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -318,7 +409,7 @@ async function callUnifiedVideoApi(
     const queryUrl = new URL(`${baseUrl}/v1/video/query`);
     queryUrl.searchParams.set('id', taskId);
 
-    const statusResponse = await fetch(queryUrl.toString(), {
+    const statusResponse = await httpFetch(queryUrl.toString(), {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -407,7 +498,7 @@ async function callVolcVideoApi(
     imageCount: imageWithRoles.filter(i => i.url).length,
   });
 
-  const submitResponse = await fetch(`${baseUrl}/volc/v1/contents/generations/tasks`, {
+  const submitResponse = await httpFetch(`${baseUrl}/volc/v1/contents/generations/tasks`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -437,7 +528,7 @@ async function callVolcVideoApi(
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     onProgress?.(Math.min(20 + Math.floor((attempt / maxAttempts) * 80), 99));
 
-    const statusResponse = await fetch(
+    const statusResponse = await httpFetch(
       `${baseUrl}/volc/v1/contents/generations/tasks/${taskId}`,
       {
         method: 'GET',
@@ -482,8 +573,8 @@ async function callVolcVideoApi(
 
 // ==================== 通义万象 wan 格式 ====================
 // MemeFast 文档:
-//   创建: POST /ali/bailian/api/v1/services/aigc/video-generation/video-synthesis
-//   查询: GET  /alibailian/api/v1/tasks/{task_id}
+//   创建: POST /services/aigc/video-generation/video-synthesis
+//   查询: GET  /tasks/{task_id}
 
 async function callWanVideoApi(
   apiKey: string,
@@ -498,6 +589,8 @@ async function callWanVideoApi(
   keyManager?: { handleError: (status: number) => boolean },
 ): Promise<string> {
   const firstFrame = imageWithRoles.find(img => img.role === 'first_frame');
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
+  const isDirectDashScope = /dashscope\.aliyuncs\.com/i.test(normalizedBaseUrl);
 
   const requestBody: Record<string, unknown> = {
     model,
@@ -513,15 +606,19 @@ async function callWanVideoApi(
     },
   };
 
-  console.log('[VideoGen] Wan format → POST /ali/bailian/api/v1/services/aigc/video-generation/video-synthesis', { model });
+  console.log('[VideoGen] Wan format → POST /services/aigc/video-generation/video-synthesis', {
+    model,
+    directDashScope: isDirectDashScope,
+  });
 
-  const submitResponse = await fetch(
-    `${baseUrl}/ali/bailian/api/v1/services/aigc/video-generation/video-synthesis`,
+  const submitResponse = await httpFetch(
+    `${normalizedBaseUrl}/services/aigc/video-generation/video-synthesis`,
     {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
+        ...(isDirectDashScope ? { 'X-DashScope-Async': 'enable' } : {}),
       },
       body: JSON.stringify(requestBody),
     },
@@ -537,23 +634,26 @@ async function callWanVideoApi(
   console.log('[VideoGen] Wan submit response:', submitData);
 
   // 百炼响应: { request_id, output: { task_id, task_status: "PENDING" } }
-  const taskId = submitData.output?.task_id;
+  const taskId = submitData.output?.task_id || submitData.task_id;
   if (!taskId) throw new Error('返回空的任务 ID');
 
-  // 轮询: GET /alibailian/api/v1/tasks/{task_id}
+  // 轮询:
+  // - DashScope 直连: GET /tasks/{task_id}
+  // - 代理兼容:      GET /alibailian/api/v1/tasks/{task_id}
+  const statusUrl = isDirectDashScope
+    ? `${normalizedBaseUrl}/tasks/${taskId}`
+    : `${normalizedBaseUrl}/alibailian/api/v1/tasks/${taskId}`;
+
   const pollInterval = 5000;
   const maxAttempts = 180;
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     onProgress?.(Math.min(20 + Math.floor((attempt / maxAttempts) * 80), 99));
 
-    const statusResponse = await fetch(
-      `${baseUrl}/alibailian/api/v1/tasks/${taskId}`,
-      {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${apiKey}` },
-      },
-    );
+    const statusResponse = await httpFetch(statusUrl, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    });
 
     if (!statusResponse.ok) {
       if (statusResponse.status === 404) throw new Error('任务不存在');
@@ -569,7 +669,11 @@ async function callWanVideoApi(
     const taskStatus = (statusData.output?.task_status ?? '').toUpperCase();
 
     if (taskStatus === 'SUCCEEDED') {
-      const videoUrl = normalizeUrl(statusData.output?.video_url);
+      const videoUrl =
+        normalizeUrl(statusData.output?.video_url)
+        || normalizeUrl(statusData.output?.url)
+        || normalizeUrl(statusData.video_url)
+        || normalizeUrl(statusData.url);
       if (!videoUrl) throw new Error('任务完成但没有视频 URL');
       return videoUrl;
     }
@@ -622,7 +726,7 @@ async function callKlingVideoApi(
 
   console.log('[VideoGen] Kling format →', isI2V ? 'image2video' : 'text2video', { model });
 
-  const submitResponse = await fetch(endpoint, {
+  const submitResponse = await httpFetch(endpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -652,7 +756,7 @@ async function callKlingVideoApi(
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     onProgress?.(Math.min(20 + Math.floor((attempt / maxAttempts) * 80), 99));
 
-    const statusResponse = await fetch(
+    const statusResponse = await httpFetch(
       `${baseUrl}/kling/v1/videos/generations/${taskId}`,
       {
         method: 'GET',
@@ -943,7 +1047,7 @@ export async function callJuxinVideoGenerationApi(
   console.log('[VideoGen] Grok request:', requestBody);
 
   // Submit video generation request
-  const submitResponse = await fetch(`${apiBaseUrl}/v1/video/create`, {
+  const submitResponse = await httpFetch(`${apiBaseUrl}/v1/video/create`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -1001,7 +1105,7 @@ export async function callJuxinVideoGenerationApi(
     const queryUrl = new URL(`${apiBaseUrl}/v1/video/query`);
     queryUrl.searchParams.set('id', taskId);
 
-    const statusResponse = await fetch(queryUrl.toString(), {
+    const statusResponse = await httpFetch(queryUrl.toString(), {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',

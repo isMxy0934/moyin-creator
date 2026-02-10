@@ -42,7 +42,7 @@ export type AIFeature =
 /**
  * 功能绑定配置
  * 每个功能可绑定多个供应商/模型（多选）
- * 格式: platform:model 数组，如 ['zhipu:glm-4.7', 'apimart:gemini-2.5-pro']
+ * 格式: providerId:model 数组（兼容旧格式 platform:model）
  */
 export type FeatureBindings = Record<AIFeature, string[] | null>;
 
@@ -476,9 +476,16 @@ export const useAPIConfigStore = create<APIConfigStore>()(
       // 切换单个绑定（添加/移除）
       toggleFeatureBinding: (feature, binding) => {
         const current = get().featureBindings[feature] || [];
-        const exists = current.includes(binding);
+
+        const idx = binding.indexOf(':');
+        const providerKey = idx > 0 ? binding.slice(0, idx) : '';
+        const model = idx > 0 ? binding.slice(idx + 1) : '';
+        const providerById = providerKey ? get().providers.find(p => p.id === providerKey) : undefined;
+        const legacyBinding = providerById && model ? `${providerById.platform}:${model}` : undefined;
+
+        const exists = current.includes(binding) || (!!legacyBinding && current.includes(legacyBinding));
         const newBindings = exists
-          ? current.filter(b => b !== binding)
+          ? current.filter(b => b !== binding && b !== legacyBinding)
           : [...current, binding];
         set((state) => ({
           featureBindings: { ...state.featureBindings, [feature]: newBindings.length > 0 ? newBindings : null },
@@ -499,14 +506,50 @@ export const useAPIConfigStore = create<APIConfigStore>()(
       getProvidersForFeature: (feature) => {
         const bindings = get().getFeatureBindings(feature);
         const results: Array<{ provider: IProvider; model: string }> = [];
+        const providers = get().providers;
+        const seen = new Set<string>();
         
         for (const binding of bindings) {
           const idx = binding.indexOf(':');
           if (idx <= 0) continue;
-          const platform = binding.slice(0, idx);
+          const providerKey = binding.slice(0, idx);
           const model = binding.slice(idx + 1);
-          const provider = get().providers.find(p => p.platform === platform);
+          if (!model) continue;
+
+          // v2: providerId:model（首选）
+          // v1 兼容: platform:model（当 providerId 未匹配时回退）
+          let provider = providers.find(p => p.id === providerKey);
+
+          if (!provider) {
+            const candidates = providers.filter(
+              p => p.platform === providerKey && parseApiKeys(p.apiKey).length > 0
+            );
+            if (candidates.length === 1) {
+              provider = candidates[0];
+            } else if (candidates.length > 1) {
+              // 同平台多个 provider 时，优先选择明确包含该 model 的 provider。
+              const modelMatched = candidates.filter(p => p.model.includes(model));
+              if (modelMatched.length === 1) {
+                provider = modelMatched[0];
+              } else if (modelMatched.length > 1) {
+                provider = modelMatched[0];
+                console.warn(
+                  `[APIConfig] Ambiguous legacy binding "${binding}", multiple model matches, using "${provider.name}" (${provider.id})`
+                );
+              } else {
+                // 关键修复：旧平台绑定且无模型命中时，不再错误回退到第一个 provider
+                console.warn(
+                  `[APIConfig] Skip legacy binding "${binding}": no provider under platform "${providerKey}" contains model "${model}"`
+                );
+                continue;
+              }
+            }
+          }
+
           if (provider && parseApiKeys(provider.apiKey).length > 0) {
+            const dedupeKey = `${provider.id}:${model}`;
+            if (seen.has(dedupeKey)) continue;
+            seen.add(dedupeKey);
             results.push({ provider, model });
           }
         }

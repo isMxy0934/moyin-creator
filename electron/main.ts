@@ -8,6 +8,22 @@ import https from 'node:https'
 import http from 'node:http'
 import os from 'node:os'
 
+type HttpProxyRequest = {
+  url: string
+  method?: string
+  headers?: Record<string, string>
+  body?: string
+}
+
+type HttpProxyResponse = {
+  ok: boolean
+  status: number
+  statusText: string
+  headers: Record<string, string>
+  body: string
+  error?: string
+}
+
 // electron-vite 构建后的目录结构
 //
 // ├─┬ out
@@ -448,6 +464,52 @@ ipcMain.handle('save-image', async (_event, { url, category, filename }) => {
   } catch (error) {
     console.error('Failed to save image:', error)
     return { success: false, error: String(error) }
+  }
+})
+
+// Proxy HTTP requests in main process to bypass renderer CORS limits
+ipcMain.handle('http-proxy-fetch', async (_event, payload: HttpProxyRequest): Promise<HttpProxyResponse> => {
+  try {
+    const target = new URL(payload.url)
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+      return {
+        ok: false,
+        status: 0,
+        statusText: 'Invalid protocol',
+        headers: {},
+        body: '',
+        error: 'Only http/https URLs are allowed',
+      }
+    }
+
+    const response = await fetch(payload.url, {
+      method: payload.method || 'GET',
+      headers: payload.headers,
+      body: payload.body,
+    })
+
+    const text = await response.text()
+    const headers: Record<string, string> = {}
+    response.headers.forEach((value, key) => {
+      headers[key] = value
+    })
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+      body: text,
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      statusText: 'Network Error',
+      headers: {},
+      body: '',
+      error: error instanceof Error ? error.message : String(error),
+    }
   }
 })
 

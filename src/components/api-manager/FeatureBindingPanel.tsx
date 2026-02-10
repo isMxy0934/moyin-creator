@@ -38,12 +38,14 @@ import { useState } from "react";
  * 供应商选项 - 每个功能可选的平台 + 模型
  */
 interface ProviderOption {
+  providerId: string;
   platform: string;
   name: string;
   model: string;
 }
 
 interface ProviderGroup {
+  providerId: string;
   platform: string;
   name: string;
   options: ProviderOption[];
@@ -89,16 +91,25 @@ const FEATURE_CONFIGS: FeatureMeta[] = [
 ];
 
 function getOptionKey(option: ProviderOption): string {
-  return `${option.platform}:${option.model}`;
+  return `${option.providerId}:${option.model}`;
 }
 
-function parseOptionKey(key: string): { platform: string; model: string } | null {
+function parseOptionKey(key: string): { providerKey: string; model: string } | null {
   const idx = key.indexOf(":");
   if (idx <= 0) return null;
-  const platform = key.slice(0, idx);
+  const providerKey = key.slice(0, idx);
   const model = key.slice(idx + 1);
-  if (!platform || !model) return null;
-  return { platform, model };
+  if (!providerKey || !model) return null;
+  return { providerKey, model };
+}
+
+function bindingMatchesOption(binding: string, option: ProviderOption): boolean {
+  const parsed = parseOptionKey(binding);
+  if (!parsed) return false;
+  return (
+    parsed.model === option.model
+    && (parsed.providerKey === option.providerId || parsed.providerKey === option.platform)
+  );
 }
 
 const DEFAULT_PLATFORM_CAPABILITIES: Record<string, ModelCapability[]> = {
@@ -227,7 +238,6 @@ function modelSupportsCapability(
 export function FeatureBindingPanel() {
   const {
     providers,
-    featureBindings,
     modelTypes,
     modelTags,
     toggleFeatureBinding,
@@ -237,18 +247,18 @@ export function FeatureBindingPanel() {
   // 跟踪展开/折叠状态
   const [expandedFeatures, setExpandedFeatures] = useState<Set<AIFeature>>(new Set());
 
-  const configuredPlatforms = useMemo(() => {
+  const configuredProviderIds = useMemo(() => {
     const set = new Set<string>();
     for (const p of providers) {
       if (parseApiKeys(p.apiKey).length > 0) {
-        set.add(p.platform);
+        set.add(p.id);
       }
     }
     return set;
   }, [providers]);
 
-  const isProviderConfigured = (platform: string): boolean => {
-    return configuredPlatforms.has(platform);
+  const isProviderConfigured = (providerId: string): boolean => {
+    return configuredProviderIds.has(providerId);
   };
 
   const optionsByFeature = useMemo(() => {
@@ -268,6 +278,7 @@ export function FeatureBindingPanel() {
           const mTags = modelTags[model];
           if (!modelSupportsCapability(model, provider, feature.requiredCapability, mType, mTags)) continue;
           opts.push({
+            providerId: provider.id,
             platform: provider.platform,
             name: provider.name,
             model,
@@ -277,8 +288,8 @@ export function FeatureBindingPanel() {
 
       // Prefer configured providers first for better UX.
       opts.sort((a, b) => {
-        const aConfigured = configuredPlatforms.has(a.platform);
-        const bConfigured = configuredPlatforms.has(b.platform);
+        const aConfigured = configuredProviderIds.has(a.providerId);
+        const bConfigured = configuredProviderIds.has(b.providerId);
         if (aConfigured !== bConfigured) return aConfigured ? -1 : 1;
         if (a.name !== b.name) return a.name.localeCompare(b.name);
         return a.model.localeCompare(b.model);
@@ -288,25 +299,21 @@ export function FeatureBindingPanel() {
     }
 
     return map;
-  }, [providers, configuredPlatforms]);
+  }, [providers, configuredProviderIds, modelTypes, modelTags]);
 
   // 计算已配置的功能数（至少有一个有效绑定）
   const configuredCount = useMemo(() => {
-    return FEATURE_CONFIGS.filter((feature) => {
-      const bindings = getFeatureBindings(feature.key);
-      if (bindings.length === 0) return false;
-      
-      // 检查是否至少有一个有效的绑定
-      const options = optionsByFeature[feature.key] || [];
-      return bindings.some(binding => {
-        const parsed = parseOptionKey(binding);
-        if (!parsed) return false;
-        const bindingKey = `${parsed.platform}:${parsed.model}`;
-        const existsInOptions = options.some((o) => getOptionKey(o) === bindingKey);
-        return existsInOptions && configuredPlatforms.has(parsed.platform);
-      });
-    }).length;
-  }, [featureBindings, optionsByFeature, configuredPlatforms, getFeatureBindings]);
+      return FEATURE_CONFIGS.filter((feature) => {
+        const bindings = getFeatureBindings(feature.key);
+        if (bindings.length === 0) return false;
+        
+        // 检查是否至少有一个有效的绑定
+        const options = optionsByFeature[feature.key] || [];
+        return bindings.some(binding => {
+          return options.some((o) => bindingMatchesOption(binding, o) && configuredProviderIds.has(o.providerId));
+        });
+      }).length;
+  }, [optionsByFeature, configuredProviderIds, getFeatureBindings]);
 
   // 切换单个模型的选中状态
   const handleToggleBinding = (feature: FeatureMeta, optionKey: string) => {
@@ -337,16 +344,21 @@ export function FeatureBindingPanel() {
       const groupMap = new Map<string, ProviderGroup>();
 
       for (const opt of opts) {
-        if (!groupMap.has(opt.platform)) {
-          groupMap.set(opt.platform, { platform: opt.platform, name: opt.name, options: [] });
+        if (!groupMap.has(opt.providerId)) {
+          groupMap.set(opt.providerId, {
+            providerId: opt.providerId,
+            platform: opt.platform,
+            name: opt.name,
+            options: [],
+          });
         }
-        groupMap.get(opt.platform)!.options.push(opt);
+        groupMap.get(opt.providerId)!.options.push(opt);
       }
 
       // 排序：已配置的优先，其余按名称
       const sorted = [...groupMap.values()].sort((a, b) => {
-        const aConf = configuredPlatforms.has(a.platform);
-        const bConf = configuredPlatforms.has(b.platform);
+        const aConf = configuredProviderIds.has(a.providerId);
+        const bConf = configuredProviderIds.has(b.providerId);
         if (aConf !== bConf) return aConf ? -1 : 1;
         return a.name.localeCompare(b.name);
       });
@@ -355,7 +367,7 @@ export function FeatureBindingPanel() {
     }
 
     return result;
-  }, [optionsByFeature, configuredPlatforms]);
+  }, [optionsByFeature, configuredProviderIds]);
 
   // 供应商分组展开/折叠状态
   const [groupExpandState, setGroupExpandState] = useState<Record<string, boolean>>({});
@@ -395,11 +407,7 @@ export function FeatureBindingPanel() {
           
           // 检查是否至少有一个有效的绑定
           const validBindings = currentBindings.filter(binding => {
-            const parsed = parseOptionKey(binding);
-            if (!parsed) return false;
-            const bindingKey = `${parsed.platform}:${parsed.model}`;
-            const existsInOptions = options.some((o) => getOptionKey(o) === bindingKey);
-            return existsInOptions && isProviderConfigured(parsed.platform);
+            return options.some((o) => bindingMatchesOption(binding, o) && isProviderConfigured(o.providerId));
           });
           const configured = validBindings.length > 0;
 
@@ -475,21 +483,21 @@ export function FeatureBindingPanel() {
                         可多选，请求将按轮询分配到各模型（间隔 3 秒）
                       </p>
                       {(groupedByFeature[feature.key] || []).map((group) => {
-                        const groupExpanded = isGroupExpanded(feature.key, group.platform);
-                        const groupConfigured = isProviderConfigured(group.platform);
+                        const groupExpanded = isGroupExpanded(feature.key, group.providerId);
+                        const groupConfigured = isProviderConfigured(group.providerId);
                         const selectedInGroup = group.options.filter(o =>
-                          currentBindings.includes(getOptionKey(o))
+                          currentBindings.some(binding => bindingMatchesOption(binding, o))
                         ).length;
 
                         return (
-                          <div key={group.platform} className="rounded-md border border-border/50 overflow-hidden">
+                          <div key={group.providerId} className="rounded-md border border-border/50 overflow-hidden">
                             {/* Provider Group Header */}
                             <div
                               className={cn(
                                 "flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-accent/50 transition-colors",
                                 groupConfigured ? "bg-muted/30" : "bg-muted/10 opacity-60"
                               )}
-                              onClick={() => toggleGroup(feature.key, group.platform)}
+                              onClick={() => toggleGroup(feature.key, group.providerId)}
                             >
                               <div className="shrink-0">
                                 {groupExpanded ? (
@@ -518,8 +526,8 @@ export function FeatureBindingPanel() {
                               <div className="px-3 pb-2 space-y-1">
                                 {group.options.map((option) => {
                                   const optionKey = getOptionKey(option);
-                                  const optionConfigured = isProviderConfigured(option.platform);
-                                  const isSelected = currentBindings.includes(optionKey);
+                                  const optionConfigured = isProviderConfigured(option.providerId);
+                                  const isSelected = currentBindings.some(binding => bindingMatchesOption(binding, option));
 
                                   return (
                                     <label
