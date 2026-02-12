@@ -314,10 +314,22 @@ export async function generateEpisodeShots(
                 };
               });
 
+              // 统一清洗，防止 AI 返回异常结构导致后续读取 shotIds 时报错
+              const normalizedViewpoints = viewpointsData
+                .filter((v: any) => v && typeof v === 'object')
+                .map((v: any, idx: number) => ({
+                  id: v.id || `viewpoint_${idx + 1}`,
+                  name: v.name || `视角${idx + 1}`,
+                  nameEn: v.nameEn || `Viewpoint ${idx + 1}`,
+                  shotIds: Array.isArray(v.shotIds) ? v.shotIds.filter(Boolean) : [],
+                  keyProps: Array.isArray(v.keyProps) ? v.keyProps : [],
+                  gridIndex: Number.isFinite(v.gridIndex) ? v.gridIndex : idx,
+                }));
+
               // 兜底：AI 可能返回空 viewpoints，避免后续 shotIds push 时报错
-              if (viewpointsData.length === 0) {
+              if (normalizedViewpoints.length === 0) {
                 console.warn(`[generateEpisodeShots] ⚠️ 场景 "${scene.location}" AI 返回空视角，使用默认视角兜底`);
-                viewpointsData.push({
+                normalizedViewpoints.push({
                   id: "overview",
                   name: "全景",
                   nameEn: "Overview",
@@ -328,7 +340,7 @@ export async function generateEpisodeShots(
               }
               
               // 检查是否有未分配的分镜，并将它们分配到合适的视角
-              const allAssignedShotIds = new Set(viewpointsData.flatMap((v: any) => v.shotIds));
+              const allAssignedShotIds = new Set(normalizedViewpoints.flatMap((v: any) => v.shotIds));
               const unassignedShots = sceneShots.filter((s: any) => !allAssignedShotIds.has(s.id));
               
               if (unassignedShots.length > 0) {
@@ -347,8 +359,8 @@ export async function generateEpisodeShots(
                   let bestViewpointIdx = 0;
                   let bestScore = 0;
                   
-                  for (let vIdx = 0; vIdx < viewpointsData.length; vIdx++) {
-                    const vp = viewpointsData[vIdx];
+                  for (let vIdx = 0; vIdx < normalizedViewpoints.length; vIdx++) {
+                    const vp = normalizedViewpoints[vIdx];
                     const vpName = vp.name.toLowerCase();
                     const vpKeywords = vp.keyProps || [];
                     
@@ -368,24 +380,27 @@ export async function generateEpisodeShots(
                   }
                   
                   if (bestScore === 0) {
-                    const overviewIdx = viewpointsData.findIndex((v: any) => 
+                    const overviewIdx = normalizedViewpoints.findIndex((v: any) => 
                       v.name.includes('全景') || v.id === 'overview'
                     );
                     bestViewpointIdx = overviewIdx >= 0 ? overviewIdx : 0;
                   }
                   
-                  const targetViewpoint = viewpointsData[bestViewpointIdx] || viewpointsData[0];
-                  targetViewpoint.shotIds.push(shot.id);
-                  console.log(`[generateEpisodeShots]   - 分镜 ${shot.id} 分配到视角 "${targetViewpoint.name}" (score: ${bestScore})`);
+                  const targetViewpoint = normalizedViewpoints[bestViewpointIdx] || normalizedViewpoints[0];
+                  if (!Array.isArray(targetViewpoint?.shotIds)) {
+                    if (targetViewpoint) targetViewpoint.shotIds = [];
+                  }
+                  targetViewpoint?.shotIds.push(shot.id);
+                  console.log(`[generateEpisodeShots]   - 分镜 ${shot.id} 分配到视角 "${targetViewpoint?.name || '全景'}" (score: ${bestScore})`);
                 }
               }
               
               updatedScenes[sceneIndex] = {
                 ...updatedScenes[sceneIndex],
-                viewpoints: viewpointsData,
+                viewpoints: normalizedViewpoints,
               };
-              viewpointCount += viewpointsData.length;
-              console.log(`[generateEpisodeShots] 💾 场景 "${scene.location}" viewpoints 已更新:`, viewpointsData);
+              viewpointCount += normalizedViewpoints.length;
+              console.log(`[generateEpisodeShots] 💾 场景 "${scene.location}" viewpoints 已更新:`, normalizedViewpoints);
             }
           } else {
             console.error(`[generateEpisodeShots] ❌ 场景分析失败:`, settledResult.reason);

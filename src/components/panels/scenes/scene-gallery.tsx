@@ -8,7 +8,7 @@
  * Folder navigation, breadcrumb, and scene card grid
  */
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
   useSceneStore,
   type Scene,
@@ -87,6 +87,7 @@ export function SceneGallery({ onSceneSelect, selectedSceneId }: SceneGalleryPro
   const [newFolderName, setNewFolderName] = useState("");
   const [renamingFolder, setRenamingFolder] = useState<SceneFolder | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const lastProjectIdRef = useRef<string | null>(activeProjectId ?? null);
 
   const visibleFolders = useMemo(() => {
     if (resourceSharing.shareScenes) return folders;
@@ -117,13 +118,17 @@ export function SceneGallery({ onSceneSelect, selectedSceneId }: SceneGalleryPro
       );
     }
     
-    // 根场景：没有 parentSceneId 的场景
-    const roots = items.filter(s => !s.parentSceneId);
+    const sceneIds = new Set(items.map((s) => s.id));
+
+    // 根场景：
+    // 1) 没有 parentSceneId
+    // 2) parentSceneId 指向不存在的父场景（兼容历史/demo 数据）
+    const roots = items.filter((s) => !s.parentSceneId || !sceneIds.has(s.parentSceneId));
     
     // 构建父子关系映射（支持多层嵌套）
     const childMap = new Map<string, Scene[]>();
     items.forEach(s => {
-      if (s.parentSceneId) {
+      if (s.parentSceneId && sceneIds.has(s.parentSceneId)) {
         const children = childMap.get(s.parentSceneId) || [];
         children.push(s);
         childMap.set(s.parentSceneId, children);
@@ -200,6 +205,22 @@ export function SceneGallery({ onSceneSelect, selectedSceneId }: SceneGalleryPro
       setCurrentFolder(null);
     }
   }, [resourceSharing.shareScenes, visibleFolders, currentFolderId, setCurrentFolder]);
+
+  // Avoid stale folder context when switching projects:
+  // a previous project's folderId can make the new project's scene list appear empty.
+  useEffect(() => {
+    if (lastProjectIdRef.current === null) {
+      lastProjectIdRef.current = activeProjectId ?? null;
+      return;
+    }
+    if (lastProjectIdRef.current !== (activeProjectId ?? null)) {
+      setCurrentFolder(null);
+      setSearchQuery("");
+      selectScene(null);
+      onSceneSelect(null);
+    }
+    lastProjectIdRef.current = activeProjectId ?? null;
+  }, [activeProjectId, onSceneSelect, selectScene, setCurrentFolder]);
 
   const handleCreateFolder = () => {
     if (!newFolderName.trim()) {

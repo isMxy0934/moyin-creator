@@ -137,15 +137,24 @@ function mergeSceneData(
   projectData: ScenePersistedState | null,
   sharedData: ScenePersistedState | null,
 ): ScenePersistedState {
+  const dedupeById = <T extends { id: string }>(items: T[]): T[] => {
+    const map = new Map<string, T>();
+    for (const item of items) {
+      if (!item?.id) continue;
+      map.set(item.id, item);
+    }
+    return Array.from(map.values());
+  };
+
   return {
-    scenes: [
+    scenes: dedupeById([
       ...(sharedData?.scenes ?? []),
       ...(projectData?.scenes ?? []),
-    ],
-    folders: [
+    ]),
+    folders: dedupeById([
       ...(sharedData?.folders ?? []),
       ...(projectData?.folders ?? []),
-    ],
+    ]),
   };
 }
 

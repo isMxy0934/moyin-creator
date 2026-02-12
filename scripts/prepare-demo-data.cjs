@@ -150,6 +150,35 @@ function prepareScenes() {
   console.log('\n[5] scenes.json')
   const src = path.join(SRC_PROJECT_DIR, 'scenes.json')
   const data = readJSON(src)
+  const state = data.state || data
+  const scenes = Array.isArray(state.scenes) ? state.scenes : []
+
+  // De-duplicate by id (keep the last one) to avoid repeated scene cards in demo.
+  const dedupedMap = new Map()
+  for (const scene of scenes) {
+    if (!scene || !scene.id) continue
+    dedupedMap.set(scene.id, scene)
+  }
+  const dedupedScenes = Array.from(dedupedMap.values())
+  const duplicateCount = scenes.length - dedupedScenes.length
+  if (duplicateCount > 0) {
+    console.log(`  Removed ${duplicateCount} duplicate scene entries`)
+  }
+
+  // Repair orphan parentSceneId references.
+  const sceneIds = new Set(dedupedScenes.map(s => s.id))
+  let orphanParentCount = 0
+  for (const scene of dedupedScenes) {
+    if (scene.parentSceneId && !sceneIds.has(scene.parentSceneId)) {
+      scene.parentSceneId = null
+      orphanParentCount++
+    }
+  }
+  if (orphanParentCount > 0) {
+    console.log(`  Repaired ${orphanParentCount} orphan parentSceneId references`)
+  }
+
+  state.scenes = dedupedScenes
   if (data.state) data.state.activeProjectId = DEMO_PROJECT_ID
   writeJSON(path.join(OUTPUT_PROJECTS, '_p', DEMO_PROJECT_ID, 'scenes.json'), data)
 }

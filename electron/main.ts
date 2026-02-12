@@ -1233,6 +1233,32 @@ function copyDirSync(src: string, dest: string) {
 }
 
 /**
+ * Copy only files that are missing in destination.
+ * Returns the number of copied files.
+ */
+function copyMissingFilesSync(src: string, dest: string): number {
+  if (!fs.existsSync(src)) return 0
+  ensureDir(dest)
+
+  let copied = 0
+  const entries = fs.readdirSync(src, { withFileTypes: true })
+  for (const entry of entries) {
+    const srcPath = path.join(src, entry.name)
+    const destPath = path.join(dest, entry.name)
+    if (entry.isDirectory()) {
+      copied += copyMissingFilesSync(srcPath, destPath)
+      continue
+    }
+    if (!fs.existsSync(destPath)) {
+      fs.copyFileSync(srcPath, destPath)
+      copied++
+    }
+  }
+
+  return copied
+}
+
+/**
  * Seed demo project exactly once.
  * Default behavior: demo is included on first startup.
  * If the user later deletes the demo project, we do NOT auto-add it back.
@@ -1277,9 +1303,7 @@ function seedDemoProject() {
     )
   }
 
-  if (fs.existsSync(seedMarkerPath)) {
-    return
-  }
+  const markerExists = fs.existsSync(seedMarkerPath)
 
   const demoPath = getDemoDataPath()
   const demoProjects = path.join(demoPath, 'projects')
@@ -1323,15 +1347,25 @@ function seedDemoProject() {
     }
     const currentState = (currentStore.state || currentStore) as ProjectIndexState
     const currentProjects = Array.isArray(currentState.projects) ? currentState.projects : []
+    const demoIds = new Set<string>(demoProjectList.map((p) => p.id))
+    const currentHasDemoProject = currentProjects.some((p) => demoIds.has(p.id))
+    const allowAddDemoProjects = !markerExists || currentHasDemoProject
     const seenIds = new Set<string>(currentProjects.map((p) => p.id))
     let addedCount = 0
+    let repairedFileCount = 0
+    let copiedProjectDirCount = 0
+    let copiedSharedFileCount = 0
 
-    for (const demoProject of demoProjectList) {
-      if (!seenIds.has(demoProject.id)) {
-        currentProjects.push(demoProject)
-        seenIds.add(demoProject.id)
-        addedCount++
+    if (allowAddDemoProjects) {
+      for (const demoProject of demoProjectList) {
+        if (!seenIds.has(demoProject.id)) {
+          currentProjects.push(demoProject)
+          seenIds.add(demoProject.id)
+          addedCount++
+        }
       }
+    } else {
+      console.log('[Seed] Demo project previously removed by user. Skip auto re-add.')
     }
 
     const mergedStore = {
@@ -1342,15 +1376,29 @@ function seedDemoProject() {
       },
       version: typeof currentStore.version === 'number' ? currentStore.version : (demoStore.version ?? 0),
     }
-    writeCompatProjectStores(JSON.stringify(mergedStore))
+
+    const hasAllCompatProjectStores = projectStoreCandidates.every((name) =>
+      fs.existsSync(path.join(projectDataRoot, name))
+    )
+    if (addedCount > 0 || !hasAllCompatProjectStores) {
+      writeCompatProjectStores(JSON.stringify(mergedStore))
+    }
     ensureCharacterStoreCompatibility(demoProjects)
 
-    // Copy per-project and shared demo data if missing
-    for (const demoProject of demoProjectList) {
+    // Copy per-project demo data if missing (or partially missing from older versions)
+    const ensuredDemoProjects = demoProjectList.filter((demoProject) =>
+      currentProjects.some((p) => p.id === demoProject.id)
+    )
+    for (const demoProject of ensuredDemoProjects) {
       const srcProjectDir = path.join(demoProjects, '_p', demoProject.id)
       const dstProjectDir = path.join(projectDataRoot, '_p', demoProject.id)
-      if (fs.existsSync(srcProjectDir) && !fs.existsSync(dstProjectDir)) {
+      if (!fs.existsSync(srcProjectDir)) continue
+
+      if (!fs.existsSync(dstProjectDir)) {
         copyDirSync(srcProjectDir, dstProjectDir)
+        copiedProjectDirCount++
+      } else {
+        repairedFileCount += copyMissingFilesSync(srcProjectDir, dstProjectDir)
       }
     }
 
@@ -1361,7 +1409,10 @@ function seedDemoProject() {
       for (const name of fs.readdirSync(demoSharedDir)) {
         const src = path.join(demoSharedDir, name)
         const dst = path.join(targetSharedDir, name)
-        if (!fs.existsSync(dst)) fs.copyFileSync(src, dst)
+        if (!fs.existsSync(dst)) {
+          fs.copyFileSync(src, dst)
+          copiedSharedFileCount++
+        }
       }
     }
 
@@ -1372,8 +1423,12 @@ function seedDemoProject() {
       console.log('[Seed] Copied media files to:', mediaRoot)
     }
 
-    writeSeedMarker()
-    console.log(`[Seed] Demo project ensured successfully. Added ${addedCount} project(s).`)
+    if (!markerExists) {
+      writeSeedMarker()
+    }
+    console.log(
+      `[Seed] Demo project ensured. added=${addedCount}, copiedDirs=${copiedProjectDirCount}, repairedFiles=${repairedFileCount}, sharedFiles=${copiedSharedFileCount}`
+    )
   } catch (error) {
     console.error('[Seed] Failed to seed demo project:', error)
   }

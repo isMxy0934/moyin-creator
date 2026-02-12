@@ -3,19 +3,27 @@
 // Commercial licensing available. See COMMERCIAL_LICENSE.md.
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import App from './App.tsx'
 import './index.css'
 import { installTestModeFetchInterceptor } from '@/lib/ai/test-mode-fetch'
+import { seedDemoForBrowserMode } from '@/lib/demo/browser-demo-seed'
 
 installTestModeFetchInterceptor()
+seedDemoForBrowserMode()
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
-)
+async function bootstrap() {
+  const { default: App } = await import('./App.tsx')
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>,
+  )
+}
 
-// Use contextBridge
-window.ipcRenderer.on('main-process-message', (_event, message) => {
-  console.log(message)
-})
+void bootstrap()
+
+// Use contextBridge (Electron only)
+if (window.ipcRenderer?.on) {
+  window.ipcRenderer.on('main-process-message', (_event, message) => {
+    console.log(message)
+  })
+}
