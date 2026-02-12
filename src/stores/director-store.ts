@@ -1709,13 +1709,15 @@ export const useDirectorStore = create<DirectorStore>()(
       return applyPromptFallback(hydrated, startId - 1 + index, storyPrompt);
     });
     
+    const nextStoryboardStatus = project?.storyboardImage ? 'editing' : 'idle';
+
     set({
       projects: {
         ...projects,
         [activeProjectId]: {
           ...project,
           splitScenes: [...splitScenes, ...newScenes],
-          storyboardStatus: 'editing',
+          storyboardStatus: nextStoryboardStatus,
         },
       },
     });

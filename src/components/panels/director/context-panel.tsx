@@ -53,7 +53,7 @@ function StatusIcon({ status }: { status?: CompletionStatus }) {
 export function DirectorContextPanel() {
   const { setActiveTab } = useMediaPanelStore();
   const scriptProject = useActiveScriptProject();
-  const { addScenesFromScript } = useDirectorStore();
+  const { addScenesFromScript, setStoryboardStatus } = useDirectorStore();
   const { resourceSharing } = useAppSettingsStore();
   const { activeProjectId } = useProjectStore();
   
@@ -61,6 +61,7 @@ export function DirectorContextPanel() {
   const projectData = useActiveDirectorProject();
   const splitScenes = projectData?.splitScenes || [];
   const storyboardStatus = projectData?.storyboardStatus || 'idle';
+  const hasStoryboard = Boolean(projectData?.storyboardImage);
   
   // 获取场景库数据
   const { scenes } = useSceneStore();
@@ -380,7 +381,12 @@ export function DirectorContextPanel() {
     const sceneMatch = findMatchingSceneAndViewpointQuick(shot, scene, shotIndexInScene >= 0 ? shotIndexInScene : undefined);
 
     if (splitScenes.some((s) => s.sourceShotId === shot.id)) {
-      toast.info('该分镜已在编辑列表中');
+      setStoryboardStatus(hasStoryboard || storyboardStatus === 'editing' ? 'editing' : 'idle');
+      toast.info(
+        hasStoryboard || storyboardStatus === 'editing'
+          ? '该分镜已在编辑列表中'
+          : '该分镜已在列表中（点下一步进入编辑场景）'
+      );
       return;
     }
     
@@ -568,7 +574,12 @@ export function DirectorContextPanel() {
 
     const skippedCount = scenesToAdd.length - dedupedScenes.length;
     if (dedupedScenes.length === 0) {
-      toast.info('该场景分镜已在编辑列表中');
+      setStoryboardStatus(hasStoryboard || storyboardStatus === 'editing' ? 'editing' : 'idle');
+      toast.info(
+        hasStoryboard || storyboardStatus === 'editing'
+          ? '该场景分镜已在编辑列表中'
+          : '该场景分镜已在列表中（点下一步进入编辑场景）'
+      );
       return;
     }
 

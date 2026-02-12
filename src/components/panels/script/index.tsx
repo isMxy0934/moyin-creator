@@ -177,6 +177,7 @@ export function ScriptView() {
   const directorProject = useActiveDirectorProject();
   const trailerConfig = directorProject?.trailerConfig || null;
   const currentSplitScenes = directorProject?.splitScenes || [];
+  const hasDirectorStoryboard = Boolean(directorProject?.storyboardImage);
 
   // Sync activeProjectId from project-store to script-store
   useEffect(() => {
@@ -1538,16 +1539,26 @@ export function ScriptView() {
         sceneToAdd.sourceShotId &&
         currentSplitScenes.some((s) => s.sourceShotId === sceneToAdd.sourceShotId)
       ) {
+        setStoryboardStatus(hasDirectorStoryboard ? 'editing' : 'idle');
         setActiveTab("director");
-        toast.info("该分镜已在导演编辑列表中，已跳转到 AI 导演");
+        toast.info(
+          hasDirectorStoryboard
+            ? "该分镜已在导演编辑列表中，已跳转到编辑场景"
+            : "该分镜已在导演编辑列表中，已跳转到输入故事（点下一步进入编辑场景）"
+        );
         return;
       }
 
       addScenesFromScript([sceneToAdd]);
+      setStoryboardStatus(hasDirectorStoryboard ? 'editing' : 'idle');
       setActiveTab("director");
-      toast.success("已跳转到AI导演，分镜完整参数已携带");
+      toast.success(
+        hasDirectorStoryboard
+          ? "已跳转到AI导演，分镜完整参数已携带"
+          : "已跳转到AI导演输入故事，分镜已携带（点下一步进入编辑场景）"
+      );
     },
-    [shots, scriptData, currentSplitScenes, addScenesFromScript, setActiveTab, setStoryboardStatus, buildDirectorSceneFromShot]
+    [shots, scriptData, currentSplitScenes, hasDirectorStoryboard, addScenesFromScript, setActiveTab, setStoryboardStatus, buildDirectorSceneFromShot]
   );
 
   // 从场景跳转到AI导演（整个场景的所有分镜）
@@ -1594,19 +1605,33 @@ export function ScriptView() {
 
       const skippedCount = scenesToAdd.length - dedupedScenes.length;
       if (dedupedScenes.length === 0) {
+        setStoryboardStatus(hasDirectorStoryboard ? 'editing' : 'idle');
         setActiveTab("director");
-        toast.info(`场景「${scene.name || scene.location}」分镜已在导演编辑列表中`);
+        toast.info(
+          hasDirectorStoryboard
+            ? `场景「${scene.name || scene.location}」分镜已在导演编辑列表中，已跳转到编辑场景`
+            : `场景「${scene.name || scene.location}」分镜已在导演编辑列表中，已跳转到输入故事（点下一步进入编辑场景）`
+        );
         return;
       }
 
       addScenesFromScript(dedupedScenes);
+      setStoryboardStatus(hasDirectorStoryboard ? 'editing' : 'idle');
       setActiveTab("director");
-      toast.success(
-        `已跳转到AI导演，场景「${scene.name || scene.location}」新增 ${dedupedScenes.length} 个分镜` +
-          (skippedCount > 0 ? `（跳过 ${skippedCount} 个重复）` : "")
-      );
+      if (hasDirectorStoryboard) {
+        toast.success(
+          `已跳转到AI导演，场景「${scene.name || scene.location}」新增 ${dedupedScenes.length} 个分镜` +
+            (skippedCount > 0 ? `（跳过 ${skippedCount} 个重复）` : "")
+        );
+      } else {
+        toast.success(
+          `已跳转到AI导演输入故事，场景「${scene.name || scene.location}」新增 ${dedupedScenes.length} 个分镜` +
+            `（点下一步进入编辑场景）` +
+            (skippedCount > 0 ? `（跳过 ${skippedCount} 个重复）` : "")
+        );
+      }
     },
-    [shots, scriptData, currentSplitScenes, addScenesFromScript, setActiveTab, setStoryboardStatus, buildDirectorSceneFromShot]
+    [shots, scriptData, currentSplitScenes, hasDirectorStoryboard, addScenesFromScript, setActiveTab, setStoryboardStatus, buildDirectorSceneFromShot]
   );
 
   // CRUD handlers - 封装projectId
