@@ -44,6 +44,39 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
 
 let win: BrowserWindow | null
 
+const USER_DATA_DIRNAME = 'MUMU'
+const LEGACY_USER_DATA_DIRNAME = '魔因漫创'
+
+function ensureBrandedUserDataPath() {
+  try {
+    const appDataPath = app.getPath('appData')
+    const targetUserDataPath = path.join(appDataPath, USER_DATA_DIRNAME)
+    const legacyUserDataPath = path.join(appDataPath, LEGACY_USER_DATA_DIRNAME)
+    const currentUserDataPath = app.getPath('userData')
+
+    if (currentUserDataPath !== targetUserDataPath) {
+      app.setPath('userData', targetUserDataPath)
+    }
+
+    const targetHasData = fs.existsSync(targetUserDataPath)
+      && fs.readdirSync(targetUserDataPath).length > 0
+
+    if (!targetHasData && fs.existsSync(legacyUserDataPath)) {
+      fs.mkdirSync(targetUserDataPath, { recursive: true })
+      fs.cpSync(legacyUserDataPath, targetUserDataPath, {
+        recursive: true,
+        force: false,
+        errorOnExist: false,
+      })
+      console.log('[UserData] Migrated legacy userData from 魔因漫创 to MUMU')
+    }
+  } catch (error) {
+    console.warn('[UserData] Failed to normalize userData path:', error)
+  }
+}
+
+ensureBrandedUserDataPath()
+
 async function canReachUrl(rawUrl: string, timeoutMs = 1500): Promise<boolean> {
   return await new Promise((resolve) => {
     try {
