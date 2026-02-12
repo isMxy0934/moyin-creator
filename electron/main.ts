@@ -45,30 +45,15 @@ process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 
 let win: BrowserWindow | null
 
 const USER_DATA_DIRNAME = 'MUMU'
-const LEGACY_USER_DATA_DIRNAME = '魔因漫创'
 
 function ensureBrandedUserDataPath() {
   try {
     const appDataPath = app.getPath('appData')
     const targetUserDataPath = path.join(appDataPath, USER_DATA_DIRNAME)
-    const legacyUserDataPath = path.join(appDataPath, LEGACY_USER_DATA_DIRNAME)
     const currentUserDataPath = app.getPath('userData')
 
     if (currentUserDataPath !== targetUserDataPath) {
       app.setPath('userData', targetUserDataPath)
-    }
-
-    const targetHasData = fs.existsSync(targetUserDataPath)
-      && fs.readdirSync(targetUserDataPath).length > 0
-
-    if (!targetHasData && fs.existsSync(legacyUserDataPath)) {
-      fs.mkdirSync(targetUserDataPath, { recursive: true })
-      fs.cpSync(legacyUserDataPath, targetUserDataPath, {
-        recursive: true,
-        force: false,
-        errorOnExist: false,
-      })
-      console.log('[UserData] Migrated legacy userData from 魔因漫创 to MUMU')
     }
   } catch (error) {
     console.warn('[UserData] Failed to normalize userData path:', error)
@@ -218,17 +203,12 @@ app.on('activate', () => {
 type StorageConfig = {
   // Single base path for all data (projects + media)
   basePath?: string
-  // Legacy fields (for migration)
-  projectPath?: string
-  mediaPath?: string
   autoCleanEnabled?: boolean
   autoCleanDays?: number
 }
 
 const DEFAULT_STORAGE_CONFIG: Required<StorageConfig> = {
   basePath: '',
-  projectPath: '',
-  mediaPath: '',
   autoCleanEnabled: false,
   autoCleanDays: 30,
 }
@@ -298,15 +278,9 @@ function pathsConflict(source: string, dest: string): string | null {
 
 // Get the base storage path (contains both projects and media)
 function getStorageBasePath() {
-  // Check new basePath first, then fall back to legacy projectPath parent
   const configured = storageConfig.basePath?.trim()
   if (configured) {
     return normalizePath(configured)
-  }
-  // Legacy migration: if projectPath exists, use its parent
-  const legacyProject = storageConfig.projectPath?.trim()
-  if (legacyProject) {
-    return path.dirname(normalizePath(legacyProject))
   }
   return app.getPath('userData')
 }
@@ -358,12 +332,6 @@ async function copyDir(source: string, destination: string) {
 
 async function removeDir(dirPath: string) {
   await fs.promises.rm(dirPath, { recursive: true, force: true })
-}
-
-async function moveDir(source: string, destination: string) {
-  if (source === destination) return
-  await copyDir(source, destination)
-  await removeDir(source)
 }
 
 async function deleteOldFiles(dirPath: string, cutoffTime: number): Promise<number> {
@@ -432,11 +400,6 @@ async function clearAllDataForDevStartup() {
     path.join(basePath, 'media'),
     ...getCacheDirs(),
   ])
-
-  const legacyProject = storageConfig.projectPath?.trim()
-  if (legacyProject) dirsToRemove.add(normalizePath(legacyProject))
-  const legacyMedia = storageConfig.mediaPath?.trim()
-  if (legacyMedia) dirsToRemove.add(normalizePath(legacyMedia))
 
   for (const dir of dirsToRemove) {
     await removeDir(dir).catch(() => {})
@@ -836,8 +799,6 @@ ipcMain.handle('storage-link-data', async (_event, dirPath: string) => {
     
     // Update config to point to this directory
     storageConfig.basePath = target
-    storageConfig.projectPath = '' // Clear legacy
-    storageConfig.mediaPath = ''   // Clear legacy
     saveStorageConfig()
     return { success: true, path: target }
   } catch (error) {
@@ -891,8 +852,6 @@ ipcMain.handle('storage-move-data', async (_event, newPath: string) => {
     
     // Update config
     storageConfig.basePath = target
-    storageConfig.projectPath = '' // Clear legacy
-    storageConfig.mediaPath = ''   // Clear legacy
     saveStorageConfig()
     
     // Clean up old directories (only if different from userData)
@@ -1014,122 +973,6 @@ ipcMain.handle('storage-import-data', async (_event, sourcePath: string) => {
     }
   } catch (error) {
     console.error('Failed to import data:', error)
-    return { success: false, error: String(error) }
-  }
-})
-
-// Legacy handlers (kept for backward compatibility but redirect to new ones)
-ipcMain.handle('storage-validate-project-dir', async (_event, dirPath: string) => {
-  // Redirect to new unified handler
-  return ipcMain.emit('storage-validate-data-dir', null, dirPath)
-})
-
-ipcMain.handle('storage-link-project-data', async (_event, dirPath: string) => {
-  // For legacy: assume dirPath is the projects folder, use parent as base
-  const target = normalizePath(dirPath)
-  const basePath = path.dirname(target)
-  storageConfig.basePath = basePath
-  storageConfig.projectPath = ''
-  storageConfig.mediaPath = ''
-  saveStorageConfig()
-  return { success: true, path: basePath }
-})
-
-ipcMain.handle('storage-link-media-data', async (_event, dirPath: string) => {
-  // For legacy: assume dirPath is the media folder, use parent as base
-  const target = normalizePath(dirPath)
-  const basePath = path.dirname(target)
-  storageConfig.basePath = basePath
-  storageConfig.projectPath = ''
-  storageConfig.mediaPath = ''
-  saveStorageConfig()
-  return { success: true, path: basePath }
-})
-
-ipcMain.handle('storage-move-project-data', async (_event, _newPath: string) => {
-  return { success: false, error: '请使用新的统一存储路径功能' }
-})
-
-ipcMain.handle('storage-move-media-data', async (_event, _newPath: string) => {
-  return { success: false, error: '请使用新的统一存储路径功能' }
-})
-
-ipcMain.handle('storage-export-project-data', async (_event, targetPath: string) => {
-  // Redirect to unified export
-  try {
-    if (!targetPath) return { success: false, error: '路径不能为空' }
-    const exportDir = path.join(
-      normalizePath(targetPath),
-      `mumu-data-${new Date().toISOString().replace(/[:.]/g, '-')}`
-    )
-    ensureDir(path.join(exportDir, 'projects'))
-    ensureDir(path.join(exportDir, 'media'))
-    await copyDir(getProjectDataRoot(), path.join(exportDir, 'projects'))
-    await copyDir(getMediaRoot(), path.join(exportDir, 'media'))
-    return { success: true, path: exportDir }
-  } catch (error) {
-    return { success: false, error: String(error) }
-  }
-})
-
-ipcMain.handle('storage-import-project-data', async (_event, sourcePath: string) => {
-  // Redirect to unified import
-  try {
-    if (!sourcePath) return { success: false, error: '路径不能为空' }
-    const source = normalizePath(sourcePath)
-    const projectsDir = path.join(source, 'projects')
-    const mediaDir = path.join(source, 'media')
-    
-    if (fs.existsSync(projectsDir)) {
-      await removeDir(getProjectDataRoot()).catch(() => {})
-      await copyDir(projectsDir, getProjectDataRoot())
-    } else {
-      // Legacy: source is the projects folder itself
-      await removeDir(getProjectDataRoot()).catch(() => {})
-      await copyDir(source, getProjectDataRoot())
-    }
-    
-    if (fs.existsSync(mediaDir)) {
-      await removeDir(getMediaRoot()).catch(() => {})
-      await copyDir(mediaDir, getMediaRoot())
-    }
-    
-    return { success: true }
-  } catch (error) {
-    return { success: false, error: String(error) }
-  }
-})
-
-ipcMain.handle('storage-export-media-data', async (_event, targetPath: string) => {
-  // Legacy: redirect to unified export
-  try {
-    if (!targetPath) return { success: false, error: '路径不能为空' }
-    const exportDir = path.join(
-      normalizePath(targetPath),
-      `mumu-data-${new Date().toISOString().replace(/[:.]/g, '-')}`
-    )
-    ensureDir(path.join(exportDir, 'projects'))
-    ensureDir(path.join(exportDir, 'media'))
-    await copyDir(getProjectDataRoot(), path.join(exportDir, 'projects'))
-    await copyDir(getMediaRoot(), path.join(exportDir, 'media'))
-    return { success: true, path: exportDir }
-  } catch (error) {
-    console.error('Failed to export data:', error)
-    return { success: false, error: String(error) }
-  }
-})
-
-ipcMain.handle('storage-import-media-data', async (_event, sourcePath: string) => {
-  try {
-    if (!sourcePath) return { success: false, error: '路径不能为空' }
-    const target = getMediaRoot()
-    const source = normalizePath(sourcePath)
-    if (source === target) return { success: true }
-    await removeDir(target)
-    await copyDir(source, target)
-    return { success: true }
-  } catch (error) {
-    console.error('Failed to import media data:', error)
     return { success: false, error: String(error) }
   }
 })
@@ -1286,8 +1129,8 @@ function shouldRepairLegacyDemoScenesFile(filePath: string): boolean {
 function seedDemoProject() {
   const projectDataRoot = getProjectDataRoot()
   const seedMarkerPath = path.join(projectDataRoot, '_meta', 'demo-seeded.json')
-  const projectStoreCandidates = ['mumu-project-store.json', 'moyin-project-store.json']
-  const characterStoreCandidates = ['mumu-character-library.json', 'moyin-character-library.json']
+  const projectStoreCandidates = ['mumu-project-store.json']
+  const characterStoreCandidates = ['mumu-character-library.json']
 
   const getFirstExistingPath = (baseDir: string, names: string[]): string | null => {
     for (const name of names) {

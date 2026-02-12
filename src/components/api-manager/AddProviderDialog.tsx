@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -148,6 +149,7 @@ export function AddProviderDialog({
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
+  const [disableThinkingByDefault, setDisableThinkingByDefault] = useState(false);
 
   // Get selected preset
   const selectedPreset = PLATFORM_PRESETS.find((p) => p.platform === platform);
@@ -161,6 +163,7 @@ export function AddProviderDialog({
       setBaseUrl("");
       setApiKey("");
       setModel("");
+      setDisableThinkingByDefault(false);
     }
   }, [open]);
 
@@ -206,6 +209,7 @@ export function AddProviderDialog({
       baseUrl: baseUrl.trim(),
       apiKey: apiKey.trim(),
       model: modelArray,
+      disableThinkingByDefault,
     });
 
     onOpenChange(false);
@@ -293,6 +297,19 @@ export function AddProviderDialog({
               value={model}
               onChange={(e) => setModel(e.target.value)}
               placeholder="输入模型名称，如 gpt-4o"
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div>
+              <p className="text-sm font-medium">默认关闭 Thinking</p>
+              <p className="text-xs text-muted-foreground">
+                开启后将默认发送 thinking.disabled
+              </p>
+            </div>
+            <Switch
+              checked={disableThinkingByDefault}
+              onCheckedChange={setDisableThinkingByDefault}
             />
           </div>
         </div>

@@ -277,6 +277,8 @@ export async function callChatAPI(
     if (options.disableThinking) {
       body.thinking = { type: 'disabled' };
       console.log('[callChatAPI] 已关闭深度思考 (thinking: disabled)');
+    } else {
+      console.log('[callChatAPI] 未关闭深度思考 (thinking: provider default)');
     }
 
     const response = await fetch(url, {

@@ -166,7 +166,7 @@ export interface CallFeatureAPIOptions {
   modelOverride?: string;
   /** 强制使用指定的配置（用于批量调度时指定具体模型） */
   configOverride?: FeatureConfig;
-  /** 关闭推理模型深度思考（智谱 GLM-4.7/4.5 等），默认 true */
+  /** 覆盖供应商默认策略：true=关闭 thinking，false=不关闭 */
   disableThinking?: boolean;
 }
 
@@ -209,8 +209,8 @@ export async function callFeatureAPI(
   console.log(`[callFeatureAPI] BaseURL: ${baseUrl}`);
   
   // 调用底层 API
-  // 结构化 JSON 输出任务默认关闭深度思考，避免 reasoning 耗尽 token
-  const disableThinking = options?.disableThinking ?? true;
+  // 优先使用调用参数，其次使用供应商默认策略。
+  const disableThinking = options?.disableThinking ?? !!config.provider.disableThinkingByDefault;
   return await callChatAPI(systemPrompt, userPrompt, {
     apiKey: config.allApiKeys.join(','),
     provider: 'openai',

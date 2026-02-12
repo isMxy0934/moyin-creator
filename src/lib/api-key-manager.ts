@@ -25,6 +25,8 @@ export interface IProvider {
   baseUrl: string;
   apiKey: string; // Supports comma or newline separated multiple keys
   model: string[];
+  // When true, pass `thinking: { type: 'disabled' }` for chat calls by default.
+  disableThinkingByDefault?: boolean;
   capabilities?: ModelCapability[];
   contextLimit?: number;
 }

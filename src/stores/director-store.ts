@@ -536,6 +536,113 @@ const defaultProjectData = (): DirectorProjectData => ({
   cinematographyProfileId: DEFAULT_CINEMATOGRAPHY_PROFILE_ID,
 });
 
+// Recover interrupted generation states after app restart.
+// Runtime tasks (pollers/workers) are not resumable, so persisted "generating" must be normalized.
+const INTERRUPTED_TASK_MESSAGE = '检测到上次任务中断，请重新发起生成';
+
+const isInterruptedGenerationStatus = (status?: GenerationStatus) =>
+  status === 'generating' || status === 'uploading';
+
+const normalizeSplitSceneAfterRehydrate = (scene: SplitScene): SplitScene => {
+  let next = scene;
+
+  if (isInterruptedGenerationStatus(scene.imageStatus)) {
+    next = {
+      ...next,
+      imageStatus: 'failed',
+      imageError: scene.imageError || INTERRUPTED_TASK_MESSAGE,
+      imageProgress: Math.min(scene.imageProgress ?? 0, 99),
+    };
+  }
+
+  if (isInterruptedGenerationStatus(scene.videoStatus)) {
+    next = {
+      ...next,
+      videoStatus: 'failed',
+      videoError: scene.videoError || INTERRUPTED_TASK_MESSAGE,
+      videoProgress: Math.min(scene.videoProgress ?? 0, 99),
+    };
+  }
+
+  if (isInterruptedGenerationStatus(scene.endFrameStatus)) {
+    next = {
+      ...next,
+      endFrameStatus: 'failed',
+      endFrameError: scene.endFrameError || INTERRUPTED_TASK_MESSAGE,
+      endFrameProgress: Math.min(scene.endFrameProgress ?? 0, 99),
+    };
+  }
+
+  return next;
+};
+
+const normalizeProjectAfterRehydrate = (project: DirectorProjectData, projectId?: string): DirectorProjectData => {
+  let changed = false;
+
+  const splitScenes = (project.splitScenes || []).map((scene) => {
+    const normalized = normalizeSplitSceneAfterRehydrate(scene);
+    if (normalized !== scene) changed = true;
+    return normalized;
+  });
+
+  const trailerScenes = (project.trailerScenes || []).map((scene) => {
+    const normalized = normalizeSplitSceneAfterRehydrate(scene);
+    if (normalized !== scene) changed = true;
+    return normalized;
+  });
+
+  let storyboardStatus = project.storyboardStatus;
+  let storyboardError = project.storyboardError;
+  if (storyboardStatus === 'generating' || storyboardStatus === 'splitting') {
+    storyboardStatus = splitScenes.length > 0
+      ? 'editing'
+      : project.storyboardImage
+        ? 'preview'
+        : 'idle';
+    storyboardError = storyboardError || INTERRUPTED_TASK_MESSAGE;
+    changed = true;
+  }
+
+  let screenplayStatus = project.screenplayStatus;
+  let screenplayError = project.screenplayError;
+  if (
+    screenplayStatus === 'generating' ||
+    screenplayStatus === 'generating_images' ||
+    screenplayStatus === 'generating_videos'
+  ) {
+    screenplayStatus = project.screenplay ? 'ready' : 'idle';
+    screenplayError = screenplayError || INTERRUPTED_TASK_MESSAGE;
+    changed = true;
+  }
+
+  let trailerConfig = project.trailerConfig;
+  if (trailerConfig?.status === 'generating') {
+    trailerConfig = {
+      ...trailerConfig,
+      status: 'error',
+      error: trailerConfig.error || INTERRUPTED_TASK_MESSAGE,
+    };
+    changed = true;
+  }
+
+  if (!changed) return project;
+
+  if (projectId) {
+    console.warn('[DirectorStore] Recovered interrupted generation state for project', projectId);
+  }
+
+  return {
+    ...project,
+    splitScenes,
+    trailerScenes,
+    storyboardStatus,
+    storyboardError,
+    screenplayStatus,
+    screenplayError,
+    trailerConfig,
+  };
+};
+
 // ==================== Initial State ====================
 
 const initialState: DirectorState = {
@@ -1777,7 +1884,25 @@ export const useDirectorStore = create<DirectorStore>()(
         
         // Legacy format: has `projects` as Record (from old monolithic file)
         if (persisted.projects && typeof persisted.projects === 'object') {
-          return { ...current, ...persisted };
+          const normalizedProjects: Record<string, DirectorProjectData> = {};
+          for (const [projectId, raw] of Object.entries(persisted.projects)) {
+            const base = defaultProjectData();
+            const rawProject = (raw || {}) as Partial<DirectorProjectData>;
+            const mergedProject: DirectorProjectData = {
+              ...base,
+              ...rawProject,
+              storyboardConfig: {
+                ...base.storyboardConfig,
+                ...(rawProject.storyboardConfig || {}),
+              },
+              trailerConfig: {
+                ...base.trailerConfig,
+                ...(rawProject.trailerConfig || {}),
+              },
+            };
+            normalizedProjects[projectId] = normalizeProjectAfterRehydrate(mergedProject, projectId);
+          }
+          return { ...current, ...persisted, projects: normalizedProjects };
         }
         
         // New per-project format: has `projectData` for single project
@@ -1786,7 +1911,23 @@ export const useDirectorStore = create<DirectorStore>()(
         if (config) updates.config = config;
         if (pid) updates.activeProjectId = pid;
         if (pid && projectData) {
-          updates.projects = { ...current.projects, [pid]: projectData };
+          const base = defaultProjectData();
+          const mergedProject: DirectorProjectData = {
+            ...base,
+            ...projectData,
+            storyboardConfig: {
+              ...base.storyboardConfig,
+              ...(projectData.storyboardConfig || {}),
+            },
+            trailerConfig: {
+              ...base.trailerConfig,
+              ...(projectData.trailerConfig || {}),
+            },
+          };
+          updates.projects = {
+            ...current.projects,
+            [pid]: normalizeProjectAfterRehydrate(mergedProject, pid),
+          };
         }
         return updates;
       },

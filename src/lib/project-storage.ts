@@ -56,7 +56,7 @@ function getAllProjectIds(): string[] {
  * Creates a StateStorage that routes data to _p/{activeProjectId}/{storeName}.json
  * Used for stores that are entirely project-scoped (script, director, timeline).
  * 
- * On getItem: reads from _p/{pid}/{storeName}, falls back to legacy key if not migrated
+ * On getItem: reads from _p/{pid}/{storeName}
  * On setItem: writes to _p/{pid}/{storeName}
  */
 export function createProjectScopedStorage(storeName: string): StateStorage {
@@ -76,8 +76,8 @@ export function createProjectScopedStorage(storeName: string): StateStorage {
       const pid = getActiveProjectId();
       
       if (!pid) {
-        console.warn(`[ProjectStorage] No activeProjectId, falling back to legacy key: ${name}`);
-        return fileStorage.getItem(name);
+        console.warn(`[ProjectStorage] No activeProjectId, skip loading ${storeName} (${name})`);
+        return null;
       }
 
       const projectKey = `_p/${pid}/${storeName}`;
@@ -89,12 +89,11 @@ export function createProjectScopedStorage(storeName: string): StateStorage {
         return projectData;
       }
 
-      // Fall back to legacy monolithic file (pre-migration)
-      console.log(`[ProjectStorage] Project file not found for ${storeName}, trying legacy key: ${name}`);
-      return fileStorage.getItem(name);
+      console.log(`[ProjectStorage] Project file not found for ${storeName}, returning empty`);
+      return null;
     },
 
-    setItem: async (name: string, value: string): Promise<void> => {
+    setItem: async (_name: string, value: string): Promise<void> => {
       // Extract the intended project ID from the data being persisted.
       // This ensures data is always written to the correct per-project file,
       // even if getActiveProjectId() returns a different value due to race conditions
@@ -114,8 +113,7 @@ export function createProjectScopedStorage(storeName: string): StateStorage {
       const pid = dataProjectId || getActiveProjectId();
       
       if (!pid) {
-        // No project active, save to legacy location
-        await fileStorage.setItem(name, value);
+        console.warn(`[ProjectStorage] No activeProjectId, skip saving ${storeName}`);
         return;
       }
 
@@ -136,7 +134,7 @@ export function createProjectScopedStorage(storeName: string): StateStorage {
     removeItem: async (name: string): Promise<void> => {
       const pid = getActiveProjectId();
       if (!pid) {
-        await fileStorage.removeItem(name);
+        console.warn(`[ProjectStorage] No activeProjectId, skip removing ${storeName} (${name})`);
         return;
       }
       const projectKey = `_p/${pid}/${storeName}`;
@@ -326,11 +324,11 @@ export function createSplitStorage<T = unknown>(
       }
     },
 
-    setItem: async (name: string, value: string): Promise<void> => {
+    setItem: async (_name: string, value: string): Promise<void> => {
       const pid = getActiveProjectId();
       
       if (!pid) {
-        await fileStorage.setItem(name, value);
+        console.warn(`[SplitStorage] No activeProjectId, skip saving ${storeName}`);
         return;
       }
 
@@ -353,15 +351,14 @@ export function createSplitStorage<T = unknown>(
         
         console.log(`[SplitStorage] Saved ${storeName} split: project(${Math.round(projectPayload.length / 1024)}KB) + shared(${Math.round(sharedPayload.length / 1024)}KB)`);
       } catch (error) {
-        console.error(`[SplitStorage] Failed to split ${storeName}, saving to legacy:`, error);
-        await fileStorage.setItem(name, value);
+        console.error(`[SplitStorage] Failed to split ${storeName}, skip saving:`, error);
       }
     },
 
     removeItem: async (name: string): Promise<void> => {
       const pid = getActiveProjectId();
       if (!pid) {
-        await fileStorage.removeItem(name);
+        console.warn(`[SplitStorage] No activeProjectId, skip removing ${storeName} (${name})`);
         return;
       }
       const projectKey = `_p/${pid}/${storeName}`;

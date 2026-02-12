@@ -122,6 +122,7 @@ export interface PendingCharacterData {
 // Data passed from script panel to scene library
 export interface PendingSceneData {
   // === 基础信息 ===
+  sourceSceneId?: string; // 来源剧本场景 ID（用于幂等去重）
   name: string;
   location: string;
   time?: string;

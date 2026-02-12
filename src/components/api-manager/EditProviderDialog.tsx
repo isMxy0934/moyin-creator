@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import type { IProvider } from "@/lib/api-key-manager";
 import { getApiKeyCount } from "@/lib/api-key-manager";
@@ -41,6 +42,7 @@ export function EditProviderDialog({
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState("");
+  const [disableThinkingByDefault, setDisableThinkingByDefault] = useState(false);
 
   // Initialize form when provider changes
   useEffect(() => {
@@ -50,6 +52,7 @@ export function EditProviderDialog({
       setApiKey(provider.apiKey);
       // 加载已有模型
       setModel(provider.model?.join(', ') || '');
+      setDisableThinkingByDefault(!!provider.disableThinkingByDefault);
     }
   }, [provider]);
 
@@ -73,6 +76,7 @@ export function EditProviderDialog({
       baseUrl: baseUrl.trim(),
       apiKey: apiKey.trim(),
       model: models,
+      disableThinkingByDefault,
     });
 
     onOpenChange(false);
@@ -145,6 +149,19 @@ export function EditProviderDialog({
             <p className="text-xs text-muted-foreground">
               多个模型用逗号分隔，第一个为默认模型
             </p>
+          </div>
+
+          <div className="flex items-center justify-between rounded-md border px-3 py-2">
+            <div>
+              <p className="text-sm font-medium">默认关闭 Thinking</p>
+              <p className="text-xs text-muted-foreground">
+                开启后将默认发送 thinking.disabled
+              </p>
+            </div>
+            <Switch
+              checked={disableThinkingByDefault}
+              onCheckedChange={setDisableThinkingByDefault}
+            />
           </div>
         </div>
 

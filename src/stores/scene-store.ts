@@ -26,6 +26,7 @@ export interface SceneFolder {
 
 export interface Scene {
   id: string;
+  sourceSceneId?: string; // 来源剧本场景 ID（用于从剧本跳转时幂等去重）
   name: string;           // 场景名称
   location: string;       // 地点描述
   time: string;           // 时间设定 (白天/夜晚/黄昏等)

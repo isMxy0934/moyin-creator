@@ -172,7 +172,7 @@ export function GenerationPanel({ selectedScene, onSceneCreated }: GenerationPan
     const data = pendingSceneData;
     setPendingSceneData(null);
     
-    // 如果有名称和地点，自动创建新场景
+    // 如果有名称和地点，自动创建或复用场景
     if (data.name && data.location) {
       // 解析时间和氛围
       let timeId = "day";
@@ -202,8 +202,31 @@ export function GenerationPanel({ selectedScene, onSceneCreated }: GenerationPan
       // 同步表单状态，确保 UI 显示正确的风格
       setStyleId(parsedStyleId);
 
-      // 自动创建场景（包含专业设计字段）
-      const newId = addScene({
+      const targetProjectId = resourceProjectId || undefined;
+      const scenes = useSceneStore.getState().scenes;
+      const sameProject = (scene: Scene) =>
+        targetProjectId ? scene.projectId === targetProjectId : !scene.projectId;
+
+      // 优先按 sourceSceneId 幂等匹配；其次按基础字段兜底匹配，避免严格模式下重复创建。
+      const existingScene =
+        (data.sourceSceneId
+          ? scenes.find((scene) =>
+              !scene.isViewpointVariant &&
+              scene.sourceSceneId === data.sourceSceneId &&
+              sameProject(scene)
+            )
+          : undefined) ||
+        scenes.find((scene) =>
+          !scene.isViewpointVariant &&
+          sameProject(scene) &&
+          scene.name.trim() === data.name.trim() &&
+          scene.location.trim() === data.location.trim() &&
+          (scene.time || "day") === timeId &&
+          (scene.atmosphere || "peaceful") === atmosphereId
+        );
+
+      const scenePayload: Omit<Scene, 'id' | 'createdAt' | 'updatedAt'> = {
+        sourceSceneId: data.sourceSceneId,
         name: data.name.trim(),
         location: data.location.trim(),
         time: timeId,
@@ -213,7 +236,7 @@ export function GenerationPanel({ selectedScene, onSceneCreated }: GenerationPan
         notes: data.notes?.trim() || undefined,
         styleId: parsedStyleId,
         folderId: currentFolderId,
-        projectId: resourceProjectId || undefined,
+        projectId: targetProjectId,
         // 专业场景设计字段
         architectureStyle: data.architectureStyle,
         lightingDesign: data.lightingDesign,
@@ -221,11 +244,22 @@ export function GenerationPanel({ selectedScene, onSceneCreated }: GenerationPan
         eraDetails: data.eraDetails,
         keyProps: data.keyProps,
         spatialLayout: data.spatialLayout,
-      } as any);
+      };
 
-      // 选中新创建的场景
-      selectScene(newId);
-      onSceneCreated?.(newId);
+      let targetSceneId = existingScene?.id;
+      if (existingScene) {
+        if (data.sourceSceneId && !existingScene.sourceSceneId) {
+          updateScene(existingScene.id, { sourceSceneId: data.sourceSceneId });
+        }
+      } else {
+        targetSceneId = addScene(scenePayload);
+      }
+
+      if (!targetSceneId) return;
+
+      // 选中目标场景（新建或复用）
+      selectScene(targetSceneId);
+      onSceneCreated?.(targetSceneId);
       
       // 如果有多视角数据，直接进入联合图生成模式
       if (data.viewpoints && data.viewpoints.length > 0 &&
@@ -277,11 +311,11 @@ export function GenerationPanel({ selectedScene, onSceneCreated }: GenerationPan
         
         const pageCount = data.contactSheetPrompts.length;
         toast.success(
-          `场景「${data.name}」已创建\n` +
+          `场景「${data.name}」已就绪\n` +
           `✔ ${data.viewpoints.length} 个视角已加载${pageCount > 1 ? `（${pageCount}张联合图）` : ''}`
         );
       } else {
-        toast.success(`场景「${data.name}」已自动创建`);
+        toast.success(`场景「${data.name}」已就绪`);
       }
     } else {
       // 只有部分数据，仅填充表单
@@ -319,7 +353,7 @@ export function GenerationPanel({ selectedScene, onSceneCreated }: GenerationPan
         setNotes(data.notes);
       }
     }
-  }, [pendingSceneData, setPendingSceneData, addScene, selectScene, onSceneCreated, currentFolderId]);
+  }, [pendingSceneData, setPendingSceneData, addScene, updateScene, selectScene, onSceneCreated, currentFolderId, resourceProjectId]);
 
   // 当用户更改宽高比时，根据视角数量重新计算最优布局
   // 注意：不重新提取视角，只更新布局和提示词

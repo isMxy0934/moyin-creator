@@ -109,6 +109,31 @@ const defaultProjectData = (): ScriptProjectData => ({
   metadataGeneratedAt: undefined,
 });
 
+const INTERRUPTED_TASK_MESSAGE = '检测到上次任务中断，请重新发起生成';
+
+const normalizeProjectAfterRehydrate = (project: ScriptProjectData): ScriptProjectData => {
+  let next = project;
+
+  if (next.parseStatus === 'parsing') {
+    next = {
+      ...next,
+      parseStatus: next.scriptData ? 'ready' : 'idle',
+      parseError: next.parseError || INTERRUPTED_TASK_MESSAGE,
+    };
+  }
+
+  if (next.shotStatus === 'generating') {
+    next = {
+      ...next,
+      shotStatus: next.shots.length > 0 ? 'ready' : 'idle',
+      shotError: next.shotError || INTERRUPTED_TASK_MESSAGE,
+      batchProgress: null,
+    };
+  }
+
+  return next;
+};
+
 export const useScriptStore = create<ScriptStore>()(
   persist(
     (set, get) => ({
@@ -653,17 +678,29 @@ export const useScriptStore = create<ScriptStore>()(
         
         // Legacy format: has `projects` as Record (from old monolithic file)
         if (persisted.projects && typeof persisted.projects === 'object') {
-          return { ...current, ...persisted };
+          const normalizedProjects: Record<string, ScriptProjectData> = {};
+          for (const [projectId, raw] of Object.entries(persisted.projects)) {
+            const mergedProject = {
+              ...defaultProjectData(),
+              ...((raw || {}) as Partial<ScriptProjectData>),
+            };
+            normalizedProjects[projectId] = normalizeProjectAfterRehydrate(mergedProject);
+          }
+          return { ...current, ...persisted, projects: normalizedProjects };
         }
         
         // New per-project format: has `projectData` for single project
         const { activeProjectId: pid, projectData } = persisted;
         if (!pid || !projectData) return current;
+        const mergedProject = normalizeProjectAfterRehydrate({
+          ...defaultProjectData(),
+          ...(projectData as Partial<ScriptProjectData>),
+        });
         
         return {
           ...current,
           activeProjectId: pid,
-          projects: { ...current.projects, [pid]: projectData },
+          projects: { ...current.projects, [pid]: mergedProject },
         };
       },
     }

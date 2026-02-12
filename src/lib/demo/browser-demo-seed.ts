@@ -14,8 +14,8 @@
  * - If demo project still exists, repair only missing per-project/shared keys.
  */
 
-import demoProjectStore from "../../../demo-data/projects/moyin-project-store.json";
-import demoCharacterLibrary from "../../../demo-data/projects/moyin-character-library.json";
+import demoProjectStore from "../../../demo-data/projects/mumu-project-store.json";
+import demoCharacterLibrary from "../../../demo-data/projects/mumu-character-library.json";
 import demoScript from "../../../demo-data/projects/_p/a4bbe260-0127-49c7-9230-e766402663c7/script.json";
 import demoDirector from "../../../demo-data/projects/_p/a4bbe260-0127-49c7-9230-e766402663c7/director.json";
 import demoCharacters from "../../../demo-data/projects/_p/a4bbe260-0127-49c7-9230-e766402663c7/characters.json";
@@ -43,8 +43,8 @@ type ProjectIndexStore = {
 } & ProjectIndexState;
 
 const BROWSER_SEED_MARKER_KEY = "mumu-browser-demo-seeded-v1";
-const PROJECT_STORE_KEYS = ["mumu-project-store", "moyin-project-store"];
-const CHARACTER_STORE_KEYS = ["mumu-character-library", "moyin-character-library"];
+const PROJECT_STORE_KEYS = ["mumu-project-store"];
+const CHARACTER_STORE_KEYS = ["mumu-character-library"];
 const DEMO_PROJECT_ID = "a4bbe260-0127-49c7-9230-e766402663c7";
 
 const DEMO_PROJECT_PAYLOADS: Record<string, string> = {

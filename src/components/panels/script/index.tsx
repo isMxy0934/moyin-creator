@@ -1369,6 +1369,7 @@ export function ScriptView() {
         });
 
         goToSceneWithData({
+          sourceSceneId: scene.id,
           name: scene.name || scene.location,
           location: scene.location,
           time: scene.time,
@@ -1396,6 +1397,7 @@ export function ScriptView() {
       } else {
         // 【简单路径】无视角分析（创作模式或未校准），传递基础场景信息
         goToSceneWithData({
+          sourceSceneId: scene.id,
           name: scene.name || scene.location,
           location: scene.location,
           time: scene.time,

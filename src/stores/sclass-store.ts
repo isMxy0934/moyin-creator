@@ -301,6 +301,43 @@ const defaultProjectData = (): SClassProjectData => ({
   lastGridSceneIds: null,
 });
 
+const INTERRUPTED_TASK_MESSAGE = '检测到上次任务中断，请重新发起生成';
+
+const normalizeShotGroupAfterRehydrate = (group: ShotGroup): ShotGroup => {
+  if (group.videoStatus !== 'generating') return group;
+  return {
+    ...group,
+    videoStatus: 'failed',
+    videoError: group.videoError || INTERRUPTED_TASK_MESSAGE,
+    videoProgress: Math.min(group.videoProgress ?? 0, 99),
+  };
+};
+
+const normalizeSingleShotAfterRehydrate = (override: SingleShotOverride): SingleShotOverride => {
+  if (override.videoStatus !== 'generating') return override;
+  return {
+    ...override,
+    videoStatus: 'failed',
+    videoError: override.videoError || INTERRUPTED_TASK_MESSAGE,
+    videoProgress: Math.min(override.videoProgress ?? 0, 99),
+  };
+};
+
+const normalizeProjectAfterRehydrate = (project: SClassProjectData): SClassProjectData => {
+  const shotGroups = project.shotGroups.map(normalizeShotGroupAfterRehydrate);
+
+  const singleShotOverrides: Record<number, SingleShotOverride> = {};
+  for (const [sceneId, override] of Object.entries(project.singleShotOverrides)) {
+    singleShotOverrides[Number(sceneId)] = normalizeSingleShotAfterRehydrate(override);
+  }
+
+  return {
+    ...project,
+    shotGroups,
+    singleShotOverrides,
+  };
+};
+
 const initialState: SClassState = {
   activeProjectId: null,
   projects: {},
@@ -756,21 +793,35 @@ export const useSClassStore = create<SClassStore>()(
         if (!persisted) return current;
 
         // 迁移辅助：清理 SClassConfig 中已移除的冗余字段（aspectRatio/resolution 已由 director-store 管理）
-        const migrateConfig = (config: any) => {
-          if (!config) return config;
-          const { aspectRatio, resolution, ...clean } = config;
-          return clean;
+        const migrateConfig = (config: unknown): SClassConfig | undefined => {
+          if (!config || typeof config !== 'object') return undefined;
+          const clean = { ...(config as Record<string, unknown>) };
+          delete clean.aspectRatio;
+          delete clean.resolution;
+          return clean as SClassConfig;
         };
-        const migrateProjectData = (pd: any) => {
-          if (!pd || !pd.config) return pd;
-          return { ...pd, config: migrateConfig(pd.config) };
+        const migrateProjectData = (pd: unknown): Partial<SClassProjectData> | undefined => {
+          if (!pd || typeof pd !== 'object') return undefined;
+          const project = pd as Partial<SClassProjectData> & Record<string, unknown>;
+          const migratedConfig = migrateConfig(project.config);
+          return migratedConfig ? { ...project, config: migratedConfig } : project;
         };
 
         // Legacy format
         if (persisted.projects && typeof persisted.projects === 'object') {
           const migratedProjects: any = {};
           for (const [k, v] of Object.entries(persisted.projects)) {
-            migratedProjects[k] = migrateProjectData(v);
+            const base = defaultProjectData();
+            const migrated = (migrateProjectData(v) || {}) as Partial<SClassProjectData>;
+            const mergedProject = {
+              ...base,
+              ...migrated,
+              config: {
+                ...base.config,
+                ...(migrated.config || {}),
+              },
+            } as SClassProjectData;
+            migratedProjects[k] = normalizeProjectAfterRehydrate(mergedProject);
           }
           return { ...current, ...persisted, projects: migratedProjects };
         }
@@ -781,7 +832,20 @@ export const useSClassStore = create<SClassStore>()(
         if (generationMode) updates.generationMode = generationMode;
         if (pid) updates.activeProjectId = pid;
         if (pid && projectData) {
-          updates.projects = { ...current.projects, [pid]: migrateProjectData(projectData) };
+          const base = defaultProjectData();
+          const migratedProjectData = (migrateProjectData(projectData) || {}) as Partial<SClassProjectData>;
+          const mergedProject = {
+            ...base,
+            ...migratedProjectData,
+            config: {
+              ...base.config,
+              ...(migratedProjectData.config || {}),
+            },
+          } as SClassProjectData;
+          updates.projects = {
+            ...current.projects,
+            [pid]: normalizeProjectAfterRehydrate(mergedProject),
+          };
         }
         return updates;
       },
