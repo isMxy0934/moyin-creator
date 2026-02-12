@@ -398,8 +398,8 @@ export function DirectorContextPanel() {
       promptZh,
       promptEn: shot.visualPrompt || shot.videoPrompt || '',
       // 三层提示词系统 (Seedance 1.5 Pro)
-      imagePrompt: shot.imagePrompt || '',
-      imagePromptZh: shot.imagePromptZh || '',
+      imagePrompt: shot.imagePrompt || shot.visualPrompt || '',
+      imagePromptZh: shot.imagePromptZh || shot.visualDescription || '',
       videoPrompt: shot.videoPrompt || '',
       videoPromptZh: shot.videoPromptZh || '',
       endFramePrompt: shot.endFramePrompt || '',
@@ -495,8 +495,8 @@ export function DirectorContextPanel() {
         promptZh,
         promptEn: shot.visualPrompt || shot.videoPrompt || '',
         // 三层提示词系统 (Seedance 1.5 Pro)
-        imagePrompt: shot.imagePrompt || '',
-        imagePromptZh: shot.imagePromptZh || '',
+        imagePrompt: shot.imagePrompt || shot.visualPrompt || '',
+        imagePromptZh: shot.imagePromptZh || shot.visualDescription || '',
         videoPrompt: shot.videoPrompt || '',
         videoPromptZh: shot.videoPromptZh || '',
         endFramePrompt: shot.endFramePrompt || '',

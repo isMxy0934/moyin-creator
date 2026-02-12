@@ -323,20 +323,20 @@ export function ShotGroupPrompt({
 // ==================== Helpers ====================
 
 /**
- * 在 prompt 文本中高亮 @Image/@Video/@Audio 标签
+ * 在 prompt 文本中高亮 @图片/@视频/@音频 及 @Image/@Video/@Audio 标签
  */
 function highlightRefs(text: string): React.ReactNode {
   if (!text) return <span className="text-muted-foreground">点击编辑组级提示词...</span>;
 
-  // 匹配 @Image1, @Video2, @Audio3 等
-  const regex = /(@(?:Image|Video|Audio)\d+)/g;
+  // 同时匹配中文标签（@图片1）和英文标签（@Image1）
+  const regex = /(@(?:图片|视频|音频|Image|Video|Audio)\d+)/g;
   const parts = text.split(regex);
 
   return parts.map((part, i) => {
-    if (regex.test(part) || part.match(/^@(?:Image|Video|Audio)\d+$/)) {
-      const type = part.startsWith("@Image")
+    if (part.match(/^@(?:图片|视频|音频|Image|Video|Audio)\d+$/)) {
+      const type = (part.startsWith("@图片") || part.startsWith("@Image"))
         ? "text-blue-500"
-        : part.startsWith("@Video")
+        : (part.startsWith("@视频") || part.startsWith("@Video"))
           ? "text-purple-500"
           : "text-green-500";
       return (
