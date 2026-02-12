@@ -179,13 +179,15 @@ export function ScriptView() {
     addScenesFromScript,
     setStoryboardStatus,
     setStoryboardConfig,
+    setActiveProjectId: setDirectorActiveProjectId,
+    ensureProject: ensureDirectorProject,
   } = useDirectorStore();
   const directorProject = useActiveDirectorProject();
   const trailerConfig = directorProject?.trailerConfig || null;
   const currentSplitScenes = directorProject?.splitScenes || [];
   const hasDirectorStoryboard = Boolean(directorProject?.storyboardImage);
 
-  // Sync activeProjectId from project-store to script-store
+  // Sync activeProjectId from project-store to script-store AND director-store
   // 切换项目时取消正在进行的导入
   useEffect(() => {
     if (activeProjectId) {
@@ -194,8 +196,11 @@ export function ScriptView() {
       importAbortRef.current = null;
       setActiveProjectId(activeProjectId);
       ensureProject(activeProjectId);
+      // 同步到 director-store，确保从脚本面板发送分镜时 director 的 projectId 已就绪
+      setDirectorActiveProjectId(activeProjectId);
+      ensureDirectorProject(activeProjectId);
     }
-  }, [activeProjectId, setActiveProjectId, ensureProject]);
+  }, [activeProjectId, setActiveProjectId, ensureProject, setDirectorActiveProjectId, ensureDirectorProject]);
 
   const projectId = activeProjectId || "default";
 

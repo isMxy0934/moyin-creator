@@ -367,6 +367,21 @@ interface DirectorActions {
   setProjectFolderId: (folderId: string | null) => void;
   setSplitScenes: (scenes: SplitScene[]) => void;
   
+  /**
+   * 将故事板切割图片合并到已有分镜上（按顺序一一对应）
+   * 只更新图片相关字段，保留所有 prompt/角色/参数
+   * 如果切割图比分镜多，多余的图创建新场景追加
+   * 如果分镜比切割图多，多余的分镜保持原样
+   */
+  mergeStoryboardImages: (splitResults: Array<{
+    dataUrl: string;
+    width: number;
+    height: number;
+    row: number;
+    col: number;
+    sourceRect: { x: number; y: number; width: number; height: number };
+  }>) => void;
+  
   // 首帧提示词更新（静态画面描述）
   updateSplitSceneImagePrompt: (sceneId: number, prompt: string, promptZh?: string) => void;
   // 视频提示词更新（动作过程描述）
@@ -1167,6 +1182,142 @@ export const useDirectorStore = create<DirectorStore>()(
     });
   },
   
+  mergeStoryboardImages: (splitResults) => {
+    const { activeProjectId, projects } = get();
+    if (!activeProjectId) return;
+    const project = projects[activeProjectId];
+    const existing = project?.splitScenes || [];
+    
+    console.log('[DirectorStore] mergeStoryboardImages: existing.length =', existing.length, 'splitResults.length =', splitResults.length);
+    
+    if (existing.length === 0) {
+      // 没有已有分镜，直接用切割结果创建新场景（走 setSplitScenes）
+      const storyPrompt = project?.storyboardConfig?.storyPrompt;
+      const newScenes = splitResults.map((result, index) => ({
+        id: index + 1,
+        sceneName: '',
+        sceneLocation: '',
+        imageDataUrl: result.dataUrl,
+        imageHttpUrl: null,
+        width: result.width,
+        height: result.height,
+        imagePrompt: '',
+        imagePromptZh: '',
+        videoPrompt: '',
+        videoPromptZh: `场景 ${index + 1}`,
+        needsEndFrame: false,
+        endFramePrompt: '',
+        endFramePromptZh: '',
+        endFrameHttpUrl: null,
+        endFrameStatus: 'idle' as const,
+        endFrameProgress: 0,
+        endFrameError: null,
+        row: result.row,
+        col: result.col,
+        sourceRect: result.sourceRect,
+        endFrameImageUrl: null,
+        endFrameSource: null,
+        characterIds: [] as string[],
+        emotionTags: [] as string[],
+        shotSize: null,
+        duration: 5,
+        ambientSound: '',
+        soundEffects: [] as string[],
+        soundEffectText: '',
+        dialogue: '',
+        actionSummary: '',
+        cameraMovement: '',
+        imageStatus: 'completed' as const,
+        imageProgress: 100,
+        imageError: null,
+        videoStatus: 'idle' as const,
+        videoProgress: 0,
+        videoUrl: null,
+        videoError: null,
+        videoMediaId: null,
+      }));
+      // 调用 setSplitScenes 来走完整初始化
+      get().setSplitScenes(newScenes as any);
+      return;
+    }
+    
+    // 有已有分镜，合并图片到已有分镜上
+    const merged = existing.map((s, idx) => {
+      const img = splitResults[idx];
+      if (!img) return s; // 没有对应的切割图，保持原样
+      return {
+        ...s,
+        imageDataUrl: img.dataUrl,
+        imageHttpUrl: null,
+        width: img.width,
+        height: img.height,
+        row: img.row,
+        col: img.col,
+        sourceRect: img.sourceRect,
+        imageStatus: 'completed' as const,
+        imageProgress: 100,
+        imageError: null,
+      };
+    });
+    
+    // 如果切割图比分镜多，多余的作为新场景追加
+    if (splitResults.length > existing.length) {
+      const maxId = Math.max(...existing.map(s => s.id), 0);
+      for (let i = existing.length; i < splitResults.length; i++) {
+        const result = splitResults[i];
+        merged.push({
+          ...merged[0], // 用第一个分镜的结构作为模板
+          id: maxId + (i - existing.length) + 1,
+          sceneName: '',
+          sceneLocation: '',
+          imageDataUrl: result.dataUrl,
+          imageHttpUrl: null,
+          width: result.width,
+          height: result.height,
+          row: result.row,
+          col: result.col,
+          sourceRect: result.sourceRect,
+          imagePrompt: '',
+          imagePromptZh: '',
+          videoPrompt: '',
+          videoPromptZh: `场景 ${i + 1}`,
+          endFramePrompt: '',
+          endFramePromptZh: '',
+          characterIds: [],
+          emotionTags: [],
+          shotSize: null,
+          sourceShotId: undefined,
+          sourceSceneId: undefined,
+          sourceEpisodeId: undefined,
+          dialogue: '',
+          actionSummary: '',
+          cameraMovement: '',
+          imageStatus: 'completed' as const,
+          imageProgress: 100,
+          imageError: null,
+          videoStatus: 'idle' as const,
+          videoProgress: 0,
+          videoUrl: null,
+          videoError: null,
+          videoMediaId: null,
+        } as any);
+      }
+    }
+    
+    const syncCount = Math.min(splitResults.length, existing.length);
+    console.log('[DirectorStore] mergeStoryboardImages: merged', syncCount, 'images into existing scenes, total =', merged.length);
+    
+    set({
+      projects: {
+        ...projects,
+        [activeProjectId]: {
+          ...project,
+          splitScenes: merged,
+        },
+      },
+    });
+  },
+  
   // ========== 三层提示词更新方法 ==========
   
   // 更新首帧提示词（静态画面描述）
@@ -1586,6 +1737,7 @@ export const useDirectorStore = create<DirectorStore>()(
   },
 
   // Mode 2: Add scenes from script directly (skip storyboard, generate images individually)
+  // 智能合并：如果已有故事板切割的空场景（有图片无sourceShotId），按顺序合并脚本数据到这些场景上
   addScenesFromScript: (scenes) => {
     const { activeProjectId, projects } = get();
     if (!activeProjectId) return;
@@ -1619,6 +1771,179 @@ export const useDirectorStore = create<DirectorStore>()(
       return;
     }
 
+    // ====== 智能合并：检测已有的「空故事板场景」 ======
+    // 空故事板场景：有图片(imageDataUrl)、无脚本来源(sourceShotId)的场景
+    // 这类场景是故事板切割后自动生成的，只有图片没有提示词
+    const storyboardOnlySceneIndices: number[] = [];
+    splitScenes.forEach((s, idx) => {
+      if (s.imageDataUrl && !s.sourceShotId) {
+        storyboardOnlySceneIndices.push(idx);
+      }
+    });
+    
+    let mergedCount = 0;
+    
+    if (storyboardOnlySceneIndices.length > 0) {
+      // 有空故事板场景 → 先合并，多余的追加
+      const merged = [...splitScenes];
+      const toAppend: typeof dedupedScenes = [];
+      
+      dedupedScenes.forEach((scene, i) => {
+        if (i < storyboardOnlySceneIndices.length) {
+          // 合并到已有空故事板场景：保留图片相关字段，覆盖提示词/角色/元数据
+          const targetIdx = storyboardOnlySceneIndices[i];
+          const existing = merged[targetIdx];
+          const hydrated = {
+            ...existing,
+            // 用脚本数据覆盖空的提示词和元数据
+            sceneName: scene.sceneName || existing.sceneName,
+            sceneLocation: scene.sceneLocation || existing.sceneLocation,
+            imagePrompt: scene.imagePrompt || scene.promptEn || existing.imagePrompt,
+            imagePromptZh: scene.imagePromptZh || scene.promptZh || existing.imagePromptZh,
+            videoPrompt: scene.videoPrompt || scene.promptEn || existing.videoPrompt,
+            videoPromptZh: scene.videoPromptZh || scene.promptZh || existing.videoPromptZh,
+            endFramePrompt: scene.endFramePrompt || existing.endFramePrompt,
+            endFramePromptZh: scene.endFramePromptZh || existing.endFramePromptZh,
+            needsEndFrame: scene.needsEndFrame || existing.needsEndFrame,
+            characterIds: scene.characterIds || existing.characterIds,
+            emotionTags: (scene.emotionTags || existing.emotionTags) as EmotionTag[],
+            shotSize: scene.shotSize || existing.shotSize,
+            duration: scene.duration || existing.duration,
+            sourceShotId: scene.sourceShotId,
+            sourceSceneId: scene.sourceSceneId,
+            sourceEpisodeId: scene.sourceEpisodeId,
+            ambientSound: scene.ambientSound || existing.ambientSound,
+            soundEffects: scene.soundEffects || existing.soundEffects,
+            soundEffectText: scene.soundEffectText || existing.soundEffectText || '',
+            dialogue: scene.dialogue || existing.dialogue,
+            actionSummary: scene.actionSummary || existing.actionSummary,
+            cameraMovement: scene.cameraMovement || existing.cameraMovement,
+            backgroundMusic: scene.backgroundMusic || existing.backgroundMusic || '',
+            sceneLibraryId: scene.sceneLibraryId || existing.sceneLibraryId,
+            viewpointId: scene.viewpointId || existing.viewpointId,
+            sceneReferenceImage: scene.sceneReferenceImage || existing.sceneReferenceImage,
+            narrativeFunction: scene.narrativeFunction || existing.narrativeFunction || '',
+            shotPurpose: scene.shotPurpose || existing.shotPurpose || '',
+            visualFocus: scene.visualFocus || existing.visualFocus || '',
+            cameraPosition: scene.cameraPosition || existing.cameraPosition || '',
+            characterBlocking: scene.characterBlocking || existing.characterBlocking || '',
+            rhythm: scene.rhythm || existing.rhythm || '',
+            visualDescription: scene.visualDescription || existing.visualDescription || '',
+            lightingStyle: scene.lightingStyle ?? existing.lightingStyle,
+            lightingDirection: scene.lightingDirection ?? existing.lightingDirection,
+            colorTemperature: scene.colorTemperature ?? existing.colorTemperature,
+            lightingNotes: scene.lightingNotes ?? existing.lightingNotes,
+            depthOfField: scene.depthOfField ?? existing.depthOfField,
+            focusTarget: scene.focusTarget ?? existing.focusTarget,
+            focusTransition: scene.focusTransition ?? existing.focusTransition,
+            cameraRig: scene.cameraRig ?? existing.cameraRig,
+            movementSpeed: scene.movementSpeed ?? existing.movementSpeed,
+            atmosphericEffects: scene.atmosphericEffects ?? existing.atmosphericEffects,
+            effectIntensity: scene.effectIntensity ?? existing.effectIntensity,
+            playbackSpeed: scene.playbackSpeed ?? existing.playbackSpeed,
+            specialTechnique: scene.specialTechnique ?? existing.specialTechnique,
+            cameraAngle: scene.cameraAngle ?? existing.cameraAngle,
+            focalLength: scene.focalLength ?? existing.focalLength,
+            photographyTechnique: scene.photographyTechnique ?? existing.photographyTechnique,
+          };
+          merged[targetIdx] = applyPromptFallback(hydrated as SplitScene, targetIdx, storyPrompt);
+          mergedCount++;
+        } else {
+          toAppend.push(scene);
+        }
+      });
+      
+      // 多余的脚本分镜作为新场景追加
+      if (toAppend.length > 0) {
+        const startId = Math.max(...merged.map(s => s.id), 0) + 1;
+        const appendedScenes = toAppend.map((scene, index) => {
+          const hydrated = {
+            id: startId + index,
+            sceneName: scene.sceneName || '',
+            sceneLocation: scene.sceneLocation || '',
+            imageDataUrl: '',
+            imageHttpUrl: null,
+            width: 0,
+            height: 0,
+            imagePrompt: scene.imagePrompt || scene.promptEn || '',
+            imagePromptZh: scene.imagePromptZh || scene.promptZh || '',
+            videoPrompt: scene.videoPrompt || scene.promptEn || '',
+            videoPromptZh: scene.videoPromptZh || scene.promptZh,
+            endFramePrompt: scene.endFramePrompt || '',
+            endFramePromptZh: scene.endFramePromptZh || '',
+            needsEndFrame: scene.needsEndFrame || false,
+            row: 0, col: 0,
+            sourceRect: { x: 0, y: 0, width: 0, height: 0 },
+            endFrameImageUrl: null, endFrameHttpUrl: null, endFrameSource: null,
+            endFrameStatus: 'idle' as const, endFrameProgress: 0, endFrameError: null,
+            characterIds: scene.characterIds || [],
+            emotionTags: scene.emotionTags || [],
+            shotSize: scene.shotSize || null,
+            duration: scene.duration || 5,
+            sourceShotId: scene.sourceShotId,
+            sourceSceneId: scene.sourceSceneId,
+            sourceEpisodeId: scene.sourceEpisodeId,
+            ambientSound: scene.ambientSound || '',
+            soundEffects: scene.soundEffects || [],
+            soundEffectText: scene.soundEffectText || '',
+            dialogue: scene.dialogue || '',
+            actionSummary: scene.actionSummary || '',
+            cameraMovement: scene.cameraMovement || '',
+            audioAmbientEnabled: true, audioSfxEnabled: true,
+            audioDialogueEnabled: true, audioBgmEnabled: false,
+            backgroundMusic: scene.backgroundMusic || '',
+            sceneLibraryId: scene.sceneLibraryId,
+            viewpointId: scene.viewpointId,
+            sceneReferenceImage: scene.sceneReferenceImage,
+            narrativeFunction: scene.narrativeFunction || '',
+            shotPurpose: scene.shotPurpose || '',
+            visualFocus: scene.visualFocus || '',
+            cameraPosition: scene.cameraPosition || '',
+            characterBlocking: scene.characterBlocking || '',
+            rhythm: scene.rhythm || '',
+            visualDescription: scene.visualDescription || '',
+            lightingStyle: scene.lightingStyle,
+            lightingDirection: scene.lightingDirection,
+            colorTemperature: scene.colorTemperature,
+            lightingNotes: scene.lightingNotes,
+            depthOfField: scene.depthOfField,
+            focusTarget: scene.focusTarget,
+            focusTransition: scene.focusTransition,
+            cameraRig: scene.cameraRig,
+            movementSpeed: scene.movementSpeed,
+            atmosphericEffects: scene.atmosphericEffects,
+            effectIntensity: scene.effectIntensity,
+            playbackSpeed: scene.playbackSpeed,
+            specialTechnique: scene.specialTechnique,
+            cameraAngle: scene.cameraAngle,
+            focalLength: scene.focalLength,
+            photographyTechnique: scene.photographyTechnique,
+            imageStatus: 'idle' as const, imageProgress: 0, imageError: null,
+            videoStatus: 'idle' as const, videoProgress: 0,
+            videoUrl: null, videoError: null, videoMediaId: null,
+          };
+          return applyPromptFallback(hydrated, startId - 1 + index, storyPrompt);
+        });
+        merged.push(...appendedScenes);
+      }
+      
+      const nextStoryboardStatus = project?.storyboardImage ? 'editing' : 'idle';
+      set({
+        projects: {
+          ...projects,
+          [activeProjectId]: {
+            ...project,
+            splitScenes: merged,
+            storyboardStatus: nextStoryboardStatus,
+          },
+        },
+      });
+      console.log('[DirectorStore] Smart merge: merged', mergedCount, 'into storyboard scenes, appended', 
+        toAppend.length, 'new, skipped duplicates:', skippedDuplicateCount, 'total:', merged.length);
+      return;
+    }
+
+    // ====== 普通追加路径：没有空故事板场景时直接追加 ======
     const startId = splitScenes.length > 0 ? Math.max(...splitScenes.map(s => s.id)) + 1 : 1;
     
     const newScenes: SplitScene[] = dedupedScenes.map((scene, index) => {
@@ -1630,7 +1955,6 @@ export const useDirectorStore = create<DirectorStore>()(
         imageHttpUrl: null,
         width: 0,
         height: 0,
-        // 三层提示词系统：优先使用专门的三层提示词，否则回退到旧的 promptEn/promptZh
         imagePrompt: scene.imagePrompt || scene.promptEn || '',
         imagePromptZh: scene.imagePromptZh || scene.promptZh || '',
         videoPrompt: scene.videoPrompt || scene.promptEn || '',
@@ -1660,17 +1984,14 @@ export const useDirectorStore = create<DirectorStore>()(
         dialogue: scene.dialogue || '',
         actionSummary: scene.actionSummary || '',
         cameraMovement: scene.cameraMovement || '',
-        // 音频开关默认全部开启（背景音乐默认关闭）
         audioAmbientEnabled: true,
         audioSfxEnabled: true,
         audioDialogueEnabled: true,
         audioBgmEnabled: false,
         backgroundMusic: scene.backgroundMusic || '',
-        // 场景库关联（自动匹配）
         sceneLibraryId: scene.sceneLibraryId,
         viewpointId: scene.viewpointId,
         sceneReferenceImage: scene.sceneReferenceImage,
-        // 叙事驱动设计（基于《电影语言的语法》）
         narrativeFunction: scene.narrativeFunction || '',
         shotPurpose: scene.shotPurpose || '',
         visualFocus: scene.visualFocus || '',
@@ -1678,7 +1999,6 @@ export const useDirectorStore = create<DirectorStore>()(
         characterBlocking: scene.characterBlocking || '',
         rhythm: scene.rhythm || '',
         visualDescription: scene.visualDescription || '',
-        // 拍摄控制（灯光/焦点/器材/特效/速度）— 每个分镜独立
         lightingStyle: scene.lightingStyle,
         lightingDirection: scene.lightingDirection,
         colorTemperature: scene.colorTemperature,
@@ -1691,9 +2011,7 @@ export const useDirectorStore = create<DirectorStore>()(
         atmosphericEffects: scene.atmosphericEffects,
         effectIntensity: scene.effectIntensity,
         playbackSpeed: scene.playbackSpeed,
-        // 特殊拍摄手法
         specialTechnique: scene.specialTechnique,
-        // 拍摄角度 / 焦距 / 摄影技法
         cameraAngle: scene.cameraAngle,
         focalLength: scene.focalLength,
         photographyTechnique: scene.photographyTechnique,
@@ -1722,7 +2040,7 @@ export const useDirectorStore = create<DirectorStore>()(
       },
     });
     
-    console.log('[DirectorStore] Added', newScenes.length, 'scenes from script, skipped duplicates:', skippedDuplicateCount, 'total:', splitScenes.length + newScenes.length);
+    console.log('[DirectorStore] Added', newScenes.length, 'scenes from script (append mode), skipped duplicates:', skippedDuplicateCount, 'total:', splitScenes.length + newScenes.length);
   },
 
   // Workflow actions
