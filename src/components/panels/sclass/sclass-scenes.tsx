@@ -347,8 +347,16 @@ export function SClassScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
     toast.success(`画幅比已切换为 ${ratio}`);
   }, [setStoryboardConfig]);
 
-  const { getApiKey, getProviderByPlatform, concurrency } = useAPIConfigStore();
+  const { getApiKey, getProviderByPlatform, concurrency, generationBackend } = useAPIConfigStore();
   const { addMediaFromUrl, getOrCreateCategoryFolder } = useMediaStore();
+
+  const ensureProviderGenerationBackend = useCallback((): boolean => {
+    if (generationBackend === 'playwright') {
+      toast.error('当前已选择 Playwright 生成方式，S 级分镜生成尚未接入该模式。请在设置中切回 Provider API。');
+      return false;
+    }
+    return true;
+  }, [generationBackend]);
   
   // Get system category folder IDs for auto-saving (images → AI图片, videos → AI视频)
   const getImageFolderId = useCallback(() => getOrCreateCategoryFolder('ai-image'), [getOrCreateCategoryFolder]);
@@ -690,6 +698,7 @@ export function SClassScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
   // Handle quad grid generation
   const handleQuadGridGenerate = useCallback(async (variationType: QuadVariationType, useCharacterRef: boolean = false) => {
     if (!quadGridTarget) return;
+    if (!ensureProviderGenerationBackend()) return;
 
     const scene = splitScenes.find(s => s.id === quadGridTarget.sceneId);
     if (!scene) return;
@@ -966,7 +975,7 @@ export function SClassScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
     } finally {
       setIsQuadGridGenerating(false);
     }
-  }, [quadGridTarget, splitScenes, storyboardConfig, getApiKey, getCharacterReferenceImages]);
+  }, [quadGridTarget, splitScenes, storyboardConfig, getApiKey, getCharacterReferenceImages, ensureProviderGenerationBackend]);
 
   // Apply quad grid result
   const handleApplyQuadGrid = useCallback(async (imageIndex: number) => {
@@ -1158,6 +1167,7 @@ export function SClassScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
   /** @deprecated 使用 S级 generateAllGroups 或 handleGenerateSingleVideo 替代 */
   const handleGenerateVideos = useCallback(async () => {
     console.warn('[DEPRECATED] handleGenerateVideos 已废弃，请使用 S级批量生成');
+    if (!ensureProviderGenerationBackend()) return;
     if (splitScenes.length === 0) {
       toast.error("没有可生成的分镜");
       return;
@@ -1339,11 +1349,12 @@ export function SClassScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
     if (completedCount === splitScenes.length) {
       toast.success("所有视频生成完成！");
     }
-  }, [splitScenes, storyboardConfig, getApiKey, concurrency, updateSplitSceneVideo]);
+  }, [splitScenes, storyboardConfig, getApiKey, concurrency, updateSplitSceneVideo, ensureProviderGenerationBackend]);
 
 
   // Generate video for a single scene - directly calls APIMart API with key rotation
   const handleGenerateSingleVideo = useCallback(async (sceneId: number) => {
+    if (!ensureProviderGenerationBackend()) return;
     const scene = splitScenes.find(s => s.id === sceneId);
     if (!scene) return;
 
@@ -1651,10 +1662,11 @@ export function SClassScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
 
     setIsGenerating(false);
     setCurrentGeneratingId(null);
-  }, [splitScenes, storyboardConfig, getApiKey, updateSplitSceneVideo, autoSaveVideoToLibrary, buildEmotionDescription, getCharacterReferenceImages]);
+  }, [splitScenes, storyboardConfig, getApiKey, updateSplitSceneVideo, autoSaveVideoToLibrary, buildEmotionDescription, getCharacterReferenceImages, ensureProviderGenerationBackend]);
 
   // Generate image for a single scene using image API
   const handleGenerateSingleImage = useCallback(async (sceneId: number) => {
+    if (!ensureProviderGenerationBackend()) return;
     const scene = splitScenes.find(s => s.id === sceneId);
     if (!scene) return;
 
@@ -1910,7 +1922,7 @@ export function SClassScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
     }
 
     setIsGenerating(false);
-  }, [splitScenes, storyboardConfig, storyboardImage, getApiKey, updateSplitSceneImage, updateSplitSceneImageStatus, autoSaveImageToLibrary, getCharacterReferenceImages]);
+  }, [splitScenes, storyboardConfig, storyboardImage, getApiKey, updateSplitSceneImage, updateSplitSceneImageStatus, autoSaveImageToLibrary, getCharacterReferenceImages, ensureProviderGenerationBackend]);
 
   // ===== Utilities for 合并生成（九宫格） =====
   type Angle = 'Back View' | 'Over-the-Shoulder (OTS)' | 'POV' | 'Low Angle (Heroic)' | 'High Angle (Vulnerable)' | 'Dutch Angle (Tilted)';
@@ -2003,6 +2015,7 @@ export function SClassScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
   };
 
   const handleMergedGenerate = useCallback(async (mode: 'first'|'last'|'both', strategy: 'cluster'|'minimal'|'none' = 'cluster', exemplar: boolean = true) => {
+    if (!ensureProviderGenerationBackend()) return;
     if (splitScenes.length === 0) {
       toast.error('没有可生成的分镜');
       return;
@@ -2520,7 +2533,7 @@ export function SClassScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
       setIsMergedRunning(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [splitScenes, storyboardConfig, getApiKey, updateSplitSceneImage, updateSplitSceneImageStatus, updateSplitSceneEndFrame, updateSplitSceneEndFrameStatus]);
+  }, [splitScenes, storyboardConfig, getApiKey, updateSplitSceneImage, updateSplitSceneImageStatus, updateSplitSceneEndFrame, updateSplitSceneEndFrameStatus, ensureProviderGenerationBackend]);
 
   // 复用单图生成的 API 路径，封装为通用函数（支持首帧/尾帧）
   // 合并生成专用：使用预计算参考列表；不降级到单图通道
@@ -2642,6 +2655,7 @@ export function SClassScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
   // Generate end frame image for a single scene using image API
   // Reuses the same API config as first frame generation
   const handleGenerateEndFrameImage = useCallback(async (sceneId: number) => {
+    if (!ensureProviderGenerationBackend()) return;
     const scene = splitScenes.find(s => s.id === sceneId);
     if (!scene) return;
 
@@ -2891,7 +2905,7 @@ export function SClassScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
     }
 
     setIsGenerating(false);
-  }, [splitScenes, storyboardConfig, getApiKey, updateSplitSceneEndFrame, updateSplitSceneEndFrameStatus, getCharacterReferenceImages]);
+  }, [splitScenes, storyboardConfig, getApiKey, updateSplitSceneEndFrame, updateSplitSceneEndFrameStatus, getCharacterReferenceImages, ensureProviderGenerationBackend]);
 
   // Save to media library (image or video) - uses system category folders
   const handleSaveToLibrary = useCallback(async (scene: SplitScene, type: 'image' | 'video') => {

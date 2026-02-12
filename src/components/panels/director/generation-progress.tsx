@@ -42,6 +42,7 @@ export function GenerationProgress() {
 
   // Get API keys from config store
   const apiKeys = useAPIConfigStore((state) => state.apiKeys);
+  const generationBackend = useAPIConfigStore((state) => state.generationBackend);
   const testModeEnabled = useAppSettingsStore((state) => state.testMode.enabled);
 
   // Calculate overall progress
@@ -136,6 +137,7 @@ export function GenerationProgress() {
       const execConfig = {
         ...config,
         apiKeys: apiKeysCopy,
+        generationBackend,
         imageOnly: isImageMode,  // Flag to only generate images
         mockImage: testModeEnabled,
         mockVideo: testModeEnabled,
@@ -157,7 +159,7 @@ export function GenerationProgress() {
     } catch (error) {
       console.error('[GenerationProgress] Failed to start generation:', error);
     }
-  }, [screenplay, config, apiKeys, isImageMode, onSceneProgressUpdate, onSceneImageCompleted, onSceneCompleted, onSceneFailed, onAllImagesCompleted, onAllCompleted, testModeEnabled]);
+  }, [screenplay, config, apiKeys, generationBackend, isImageMode, onSceneProgressUpdate, onSceneImageCompleted, onSceneCompleted, onSceneFailed, onAllImagesCompleted, onAllCompleted, testModeEnabled]);
 
   // Track if we've already started generation for this screenplay
   const hasStartedRef = useRef<string | null>(null);

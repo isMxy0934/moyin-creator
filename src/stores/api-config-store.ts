@@ -9,7 +9,7 @@
 
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import type { ProviderId, ServiceType } from '@opencut/ai-core';
+import type { ProviderId, ServiceType, GenerationConfig } from '@opencut/ai-core';
 import { 
   type ModelCapability,
   type IProvider, 
@@ -147,6 +147,8 @@ export interface LegacyImageHostConfig {
   };
 }
 
+export type GenerationBackend = NonNullable<GenerationConfig['generationBackend']>;
+
 interface APIConfigState {
   // Provider-based storage (v2)
   providers: IProvider[];
@@ -159,6 +161,9 @@ interface APIConfigState {
   
   // Concurrency control
   concurrency: number;
+
+  // Media generation backend
+  generationBackend: GenerationBackend;
   
   // Aspect ratio preference
   aspectRatio: '16:9' | '9:16';
@@ -208,6 +213,7 @@ interface APIConfigActions {
   
   // Concurrency
   setConcurrency: (n: number) => void;
+  setGenerationBackend: (backend: GenerationBackend) => void;
   
   // Aspect ratio
   setAspectRatio: (ratio: '16:9' | '9:16') => void;
@@ -298,6 +304,7 @@ const initialState: APIConfigState = {
   featureBindings: defaultFeatureBindings,
   apiKeys: {},
   concurrency: 1,  // Default to serial execution (single key rate limit)
+  generationBackend: 'provider',
   aspectRatio: '16:9',
   orientation: 'landscape',
   advancedOptions: { ...DEFAULT_ADVANCED_OPTIONS },
@@ -698,6 +705,12 @@ export const useAPIConfigStore = create<APIConfigStore>()(
         console.log(`[APIConfig] Set concurrency to ${value}`);
       },
 
+      setGenerationBackend: (backend) => {
+        const value: GenerationBackend = backend === 'playwright' ? 'playwright' : 'provider';
+        set({ generationBackend: value });
+        console.log(`[APIConfig] Set generation backend to ${value}`);
+      },
+
       // ==================== Aspect ratio ====================
       
       setAspectRatio: (ratio) => {
@@ -843,7 +856,7 @@ export const useAPIConfigStore = create<APIConfigStore>()(
     }),
     {
       name: 'opencut-api-config',  // localStorage key
-      version: 7,  // v7: remove memefast default/bindings and keep provider config fully user-driven
+      version: 8,  // v8: add generation backend selector (provider/playwright)
       storage: createJSONStorage(() => fileStorage),
       migrate: (persistedState: unknown, version: number) => {
         const state = persistedState as (
@@ -853,6 +866,8 @@ export const useAPIConfigStore = create<APIConfigStore>()(
           }
         ) | undefined;
         console.log(`[APIConfig] Migrating from version ${version}`);
+        const generationBackend: GenerationBackend =
+          state?.generationBackend === 'playwright' ? 'playwright' : 'provider';
         
         // Default feature bindings for migration
         const defaultBindings: FeatureBindings = {
@@ -956,6 +971,7 @@ export const useAPIConfigStore = create<APIConfigStore>()(
             providers: removeMemefastProviders(providers),
             featureBindings: removeMemefastBindings(defaultBindings),
             imageHostProviders: resolveImageHostProviders(),
+            generationBackend,
             // Keep apiKeys for backward compat
             apiKeys: oldApiKeys,
           };
@@ -971,6 +987,7 @@ export const useAPIConfigStore = create<APIConfigStore>()(
             providers: removeMemefastProviders(providers),
             featureBindings: removeMemefastBindings(mergedBindings),
             imageHostProviders: resolveImageHostProviders(),
+            generationBackend,
           };
         }
 
@@ -998,6 +1015,7 @@ export const useAPIConfigStore = create<APIConfigStore>()(
             providers: removeMemefastProviders(providers),
             featureBindings: removeMemefastBindings(mergedBindings),
             imageHostProviders: resolveImageHostProviders(),
+            generationBackend,
           };
         }
         
@@ -1033,6 +1051,7 @@ export const useAPIConfigStore = create<APIConfigStore>()(
             providers: cleanedProviders,
             featureBindings: cleanedBindings,
             imageHostProviders: resolveImageHostProviders(),
+            generationBackend,
           };
         }
         
@@ -1062,6 +1081,7 @@ export const useAPIConfigStore = create<APIConfigStore>()(
             providers: removeMemefastProviders(state?.providers),
             featureBindings: removeMemefastBindings(newBindings),
             imageHostProviders: resolveImageHostProviders(),
+            generationBackend,
           };
         }
         
@@ -1072,6 +1092,7 @@ export const useAPIConfigStore = create<APIConfigStore>()(
             providers: removeMemefastProviders(state?.providers),
             featureBindings: removeMemefastBindings(defaultBindings),
             imageHostProviders: resolveImageHostProviders(),
+            generationBackend,
           };
         }
         
@@ -1093,6 +1114,7 @@ export const useAPIConfigStore = create<APIConfigStore>()(
           providers: removeMemefastProviders(state?.providers),
           featureBindings: removeMemefastBindings(mergedBindings),
           imageHostProviders: resolveImageHostProviders(),
+          generationBackend,
         };
       },
       partialize: (state) => ({
@@ -1101,6 +1123,7 @@ export const useAPIConfigStore = create<APIConfigStore>()(
         featureBindings: state.featureBindings,
         apiKeys: state.apiKeys, // Keep for backward compat
         concurrency: state.concurrency,
+        generationBackend: state.generationBackend,
         aspectRatio: state.aspectRatio,
         orientation: state.orientation,
         advancedOptions: state.advancedOptions,

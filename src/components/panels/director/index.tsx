@@ -26,6 +26,7 @@ import { Separator } from "@/components/ui/separator";
 // ResizablePanelGroup not needed here - using global layout
 import { useState, useCallback } from "react";
 import { useAppSettingsStore } from "@/stores/app-settings-store";
+import { useAPIConfigStore } from "@/stores/api-config-store";
 import { useMediaStore } from "@/stores/media-store";
 import { generateStoryboardImage, generateSceneVideos } from "@/lib/storyboard";
 import { getFeatureConfig } from "@/lib/ai/feature-router";
@@ -79,6 +80,7 @@ export function DirectorView() {
   const screenplayError = projectData?.screenplayError || null;
 
   const testModeEnabled = useAppSettingsStore((state) => state.testMode.enabled);
+  const generationBackend = useAPIConfigStore((state) => state.generationBackend);
   const { addMediaFromUrl, getOrCreateCategoryFolder } = useMediaStore();
   const { setActiveTab } = useMediaPanelStore();
   const overallProgress = useOverallProgress();
@@ -204,6 +206,7 @@ export function DirectorView() {
           model,
           baseUrl,
           mockMode: testModeEnabled,
+          generationBackend,
         },
         (progress) => setStoryboardProgress(progress)
       );
@@ -230,7 +233,7 @@ export function DirectorView() {
       setStoryboardStatus('error');
       toast.error(`故事板生成失败: ${err.message}`);
     }
-  }, [setStoryboardImage, setStoryboardStatus, setStoryboardError, setStoryboardConfig, getOrCreateCategoryFolder, addMediaFromUrl, activeProjectId, testModeEnabled]);
+  }, [setStoryboardImage, setStoryboardStatus, setStoryboardError, setStoryboardConfig, getOrCreateCategoryFolder, addMediaFromUrl, activeProjectId, testModeEnabled, generationBackend]);
 
   // Handle video generation from split scenes
   const handleGenerateVideos = useCallback(async () => {
@@ -274,6 +277,7 @@ export function DirectorView() {
         model,
         baseUrl,
         mockMode: testModeEnabled,
+        generationBackend,
       },
       (sceneId, progress) => {
         console.log(`[DirectorView] Scene ${sceneId} progress: ${progress}%`);
@@ -288,7 +292,7 @@ export function DirectorView() {
     );
 
     toast.success('所有视频生成完成！');
-  }, [splitScenes, storyboardConfig, testModeEnabled]);
+  }, [splitScenes, storyboardConfig, testModeEnabled, generationBackend]);
 
   // Render based on current status (prioritize storyboard workflow)
   const renderContent = () => {

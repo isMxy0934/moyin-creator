@@ -222,12 +222,17 @@ async function handleGenerateScreenplay(command: GenerateScreenplayCommand): Pro
   }
 }
 
+type MediaGenerationBackend = 'provider' | 'playwright';
+
+function getMediaGenerationBackend(config: Partial<GenerationConfig>): MediaGenerationBackend {
+  return config.generationBackend === 'playwright' ? 'playwright' : 'provider';
+}
+
 /**
- * Helper: Generate image via API
+ * Helper: Generate image via provider API
  * Returns image URL after polling for completion
- * @param referenceImages - Character reference images (base64 or URL) for consistency
  */
-async function generateImage(
+async function generateImageViaProvider(
   prompt: string,
   negativePrompt: string,
   config: Partial<GenerationConfig> & { apiKey?: string },
@@ -279,11 +284,10 @@ async function generateImage(
 }
 
 /**
- * Helper: Generate video via API
+ * Helper: Generate video via provider API
  * Returns video URL after polling for completion
- * @param referenceImages - Character reference images (URL) for consistency
  */
-async function generateVideo(
+async function generateVideoViaProvider(
   imageUrl: string,
   prompt: string,
   config: Partial<GenerationConfig> & { apiKey?: string },
@@ -331,6 +335,56 @@ async function generateVideo(
   }
   
   throw new Error('Invalid API response: no taskId or videoUrl');
+}
+
+/**
+ * Playwright backend placeholder.
+ * Worker currently has no browser automation runtime; this branch is reserved for later integration.
+ */
+async function generateImageViaPlaywright(): Promise<string> {
+  throw new Error('当前已选择 Playwright 生成方式，但 Worker 端尚未接入该执行链路。请在设置中切回 Provider API。');
+}
+
+/**
+ * Playwright backend placeholder.
+ * Worker currently has no browser automation runtime; this branch is reserved for later integration.
+ */
+async function generateVideoViaPlaywright(): Promise<string> {
+  throw new Error('当前已选择 Playwright 生成方式，但 Worker 端尚未接入该执行链路。请在设置中切回 Provider API。');
+}
+
+/**
+ * Helper: Generate image using selected backend
+ */
+async function generateImage(
+  prompt: string,
+  negativePrompt: string,
+  config: Partial<GenerationConfig> & { apiKey?: string },
+  onProgress?: (progress: number) => void,
+  referenceImages?: string[]
+): Promise<string> {
+  const backend = getMediaGenerationBackend(config);
+  if (backend === 'playwright') {
+    return generateImageViaPlaywright();
+  }
+  return generateImageViaProvider(prompt, negativePrompt, config, onProgress, referenceImages);
+}
+
+/**
+ * Helper: Generate video using selected backend
+ */
+async function generateVideo(
+  imageUrl: string,
+  prompt: string,
+  config: Partial<GenerationConfig> & { apiKey?: string },
+  onProgress?: (progress: number) => void,
+  referenceImages?: string[]
+): Promise<string> {
+  const backend = getMediaGenerationBackend(config);
+  if (backend === 'playwright') {
+    return generateVideoViaPlaywright();
+  }
+  return generateVideoViaProvider(imageUrl, prompt, config, onProgress, referenceImages);
 }
 
 /**

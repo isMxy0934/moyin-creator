@@ -2,6 +2,7 @@
 // Licensed under AGPL-3.0-or-later. See LICENSE for details.
 // Commercial licensing available. See COMMERCIAL_LICENSE.md.
 import { useCharacterLibraryStore } from "@/stores/character-library-store";
+import { useAPIConfigStore } from "@/stores/api-config-store";
 import { getFeatureConfig } from "@/lib/ai/feature-router";
 import { imageUrlToBase64 } from "@/lib/ai/image-generator";
 import { readImageAsBase64 } from "@/lib/image-storage";
@@ -77,6 +78,11 @@ export async function callImageGenerationApi(
   referenceImages: string[] = [],
   onProgress?: (progress: number) => void
 ): Promise<{ imageUrl: string; httpUrl: string }> {
+  const generationBackend = useAPIConfigStore.getState().generationBackend;
+  if (generationBackend === 'playwright') {
+    throw new Error('当前已选择 Playwright 生成方式，但图片生成功能尚未接入该方式。请在设置中切回 Provider API。');
+  }
+
   const featureConfig = getImageApiConfig();
   if (!featureConfig) {
     throw new Error('请先在设置中配置图片生成服务映射');

@@ -132,6 +132,11 @@ export interface GenerationConfig {
 
   // Generation
   concurrency: number;        // How many scenes to generate in parallel
+
+  // Media generation backend
+  // - provider: direct API provider calls
+  // - playwright: browser automation pipeline (CDP/Playwright)
+  generationBackend?: 'provider' | 'playwright';
   
   // Provider selection
   imageProvider: 'memefast' | 'mock';

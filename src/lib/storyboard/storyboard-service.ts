@@ -28,6 +28,7 @@ export interface StoryboardGenerationConfig {
   provider?: string;
   model?: string;
   baseUrl?: string;
+  generationBackend?: 'provider' | 'playwright';
   mockMode?: boolean;
 }
 
@@ -299,6 +300,7 @@ export async function generateStoryboardImage(
     characterDescriptions = [],
     apiKey,
     provider = 'memefast',
+    generationBackend = 'provider',
     mockMode = false,
   } = config;
 
@@ -354,6 +356,10 @@ export async function generateStoryboardImage(
         cellHeight: gridConfig.cellHeight,
       },
     };
+  }
+
+  if (generationBackend === 'playwright') {
+    throw new Error('当前已选择 Playwright 生成方式，但故事板生成功能尚未接入该方式。请在设置中切回 Provider API。');
   }
 
   // Validate API key
@@ -580,6 +586,7 @@ export async function generateSceneVideos(
     provider?: string;
     model?: string;
     baseUrl?: string;
+    generationBackend?: 'provider' | 'playwright';
     mockMode?: boolean;
     characterReferenceImages?: string[];
     videoResolution?: '480p' | '720p' | '1080p';
@@ -594,6 +601,7 @@ export async function generateSceneVideos(
     aspectRatio,
     apiKey,
     provider = 'memefast',
+    generationBackend = 'provider',
     model,
     baseUrl,
     mockMode = false,
@@ -603,6 +611,10 @@ export async function generateSceneVideos(
   // Validate API key
   if (!apiKey && !mockMode) {
     throw new Error('请先在设置中配置 API Key');
+  }
+
+  if (generationBackend === 'playwright' && !mockMode) {
+    throw new Error('当前已选择 Playwright 生成方式，但视频生成功能尚未接入该方式。请在设置中切回 Provider API。');
   }
 
   // Process scenes sequentially with rate limiting

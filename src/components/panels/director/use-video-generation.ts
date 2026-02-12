@@ -351,6 +351,7 @@ export async function callVideoGenerationApi(
   /** Seedance 2.0: 是否锁定运镜（默认 false） */
   cameraFixed?: boolean,
 ): Promise<string> {
+  const generationBackend = useAPIConfigStore.getState().generationBackend;
   const featureConfig = getFeatureConfig('video_generation');
   const resolvedPlatform = platform || featureConfig?.platform;
   if (!resolvedPlatform) {
@@ -364,6 +365,10 @@ export async function callVideoGenerationApi(
     await waitForTestModeLatency();
     onProgress?.(100);
     return createMockVideoUrl(createMockTaskId('video'));
+  }
+
+  if (generationBackend === 'playwright') {
+    throw new Error('当前已选择 Playwright 生成方式，但视频生成功能尚未接入该方式。请在设置中切回 Provider API。');
   }
 
   const model = featureConfig?.models?.[0];

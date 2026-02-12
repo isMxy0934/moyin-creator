@@ -92,6 +92,7 @@ export function SettingsPanel() {
   const {
     providers,
     concurrency,
+    generationBackend,
     advancedOptions,
     imageHostProviders,
     addProvider,
@@ -101,6 +102,7 @@ export function SettingsPanel() {
     updateImageHostProvider,
     removeImageHostProvider,
     setConcurrency,
+    setGenerationBackend,
     setAdvancedOption,
     resetAdvancedOptions,
     isImageHostConfigured,
@@ -819,8 +821,34 @@ export function SettingsPanel() {
               全局设置
             </h3>
 
-            {/* Concurrency */}
+            {/* Generation backend */}
             <div className="space-y-3">
+              <Label className="text-xs text-muted-foreground">生成方式</Label>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant={generationBackend === 'provider' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setGenerationBackend('provider')}
+                >
+                  Provider API
+                </Button>
+                <Button
+                  type="button"
+                  variant={generationBackend === 'playwright' ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setGenerationBackend('playwright')}
+                >
+                  Playwright
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                二选一全局生效。当前：{generationBackend === 'provider' ? 'Provider API' : 'Playwright'}
+              </p>
+            </div>
+
+            {/* Concurrency */}
+            <div className="space-y-3 pt-2 border-t border-border">
               <Label className="text-xs text-muted-foreground">并发生成数</Label>
               <div className="flex items-center gap-3">
                 <Input
