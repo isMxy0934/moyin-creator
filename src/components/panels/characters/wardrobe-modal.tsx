@@ -16,6 +16,8 @@ import {
   useCharacterLibraryStore,
 } from "@/stores/character-library-store";
 import { getFeatureConfig, getFeatureNotConfiguredMessage } from "@/lib/ai/feature-router";
+import { useAPIConfigStore } from "@/stores/api-config-store";
+import { generateGeminiImageViaPlaywright } from "@/lib/playwright/gemini-web-generator";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -108,13 +110,18 @@ export function WardrobeModal({ character, open, onOpenChange }: WardrobeModalPr
   };
 
   const handleGenerateVariation = async (variation: CharacterVariation) => {
-    const featureConfig = getFeatureConfig('character_generation');
-    if (!featureConfig) {
-      toast.error(getFeatureNotConfiguredMessage('character_generation'));
-      return;
+    const generationBackend = useAPIConfigStore.getState().generationBackend;
+    let apiKey = '';
+    let provider = 'memefast';
+    if (generationBackend !== 'playwright') {
+      const featureConfig = getFeatureConfig('character_generation');
+      if (!featureConfig) {
+        toast.error(getFeatureNotConfiguredMessage('character_generation'));
+        return;
+      }
+      apiKey = featureConfig.apiKey;
+      provider = featureConfig.platform;
     }
-    const apiKey = featureConfig.apiKey;
-    const provider = featureConfig.platform;
 
     // Need base character image for consistency
     if (!character.thumbnailUrl && character.views.length === 0) {
@@ -408,7 +415,7 @@ export function WardrobeModal({ character, open, onOpenChange }: WardrobeModalPr
 // Helper: Generate variation image via API
 async function generateVariationImage(
   prompt: string, 
-  apiKey: string,
+  apiKey?: string,
   referenceImage?: string,
   styleId?: string,
   provider: string = 'memefast'
@@ -486,3 +493,16 @@ async function pollForImage(taskId: string, apiKey: string, provider: string = '
 
   throw new Error('图片生成超时');
 }
+  const generationBackend = useAPIConfigStore.getState().generationBackend;
+  if (generationBackend === 'playwright') {
+    return generateGeminiImageViaPlaywright({
+      prompt: fullPrompt,
+      aspectRatio: '1:1',
+      referenceImageUrl: referenceImage,
+      timeoutMs: 8 * 60 * 1000,
+    });
+  }
+
+  if (!apiKey) {
+    throw new Error('API Key 未配置');
+  }

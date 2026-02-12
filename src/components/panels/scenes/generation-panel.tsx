@@ -19,6 +19,7 @@ import { useMediaPanelStore } from "@/stores/media-panel-store";
 import { useScriptStore } from "@/stores/script-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useMediaStore } from "@/stores/media-store";
+import { useAPIConfigStore } from "@/stores/api-config-store";
 import { getFeatureConfig, getFeatureNotConfiguredMessage } from "@/lib/ai/feature-router";
 import { generateSceneImage as generateSceneImageAPI } from "@/lib/ai/image-generator";
 import { generateContactSheetPrompt, generateMultiPageContactSheetData, type SceneViewpoint } from "@/lib/script/scene-viewpoint-generator";
@@ -84,6 +85,7 @@ export function GenerationPanel({ selectedScene, onSceneCreated }: GenerationPan
   } = useSceneStore();
 
   const { pendingSceneData, setPendingSceneData } = useMediaPanelStore();
+  const generationBackend = useAPIConfigStore((state) => state.generationBackend);
   const { addMediaFromUrl, getOrCreateCategoryFolder } = useMediaStore();
   
   // 获取当前项目的分镜数据，用于提取场景道具
@@ -574,7 +576,7 @@ ${gridItemsZh}
     }
 
     const featureConfig = getFeatureConfig('character_generation');
-    if (!featureConfig) {
+    if (!featureConfig && generationBackend !== 'playwright') {
       toast.error(getFeatureNotConfiguredMessage('character_generation'));
       return;
     }
@@ -815,7 +817,7 @@ ${gridItemsZh}
     }
 
     const featureConfig = getFeatureConfig('character_generation');
-    if (!featureConfig) {
+    if (!featureConfig && generationBackend !== 'playwright') {
       toast.error(getFeatureNotConfiguredMessage('character_generation'));
       return;
     }
@@ -1344,7 +1346,7 @@ ${gridItemsZh}
     }
 
     const featureConfig = getFeatureConfig('character_generation');
-    if (!featureConfig) {
+    if (!featureConfig && generationBackend !== 'playwright') {
       toast.error(getFeatureNotConfiguredMessage('character_generation'));
       return;
     }
@@ -1622,7 +1624,7 @@ ${anchor} 的背面直视镜头。展示后部结构。背景是物体面向的�
     }
 
     const featureConfig = getFeatureConfig('character_generation');
-    if (!featureConfig) {
+    if (!featureConfig && generationBackend !== 'playwright') {
       toast.error(getFeatureNotConfiguredMessage('character_generation'));
       return;
     }

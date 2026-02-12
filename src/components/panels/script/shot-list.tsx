@@ -11,6 +11,7 @@
 import { useState, useCallback } from "react";
 import { useScriptStore } from "@/stores/script-store";
 import { useCharacterLibraryStore, type Character, type CharacterVariation } from "@/stores/character-library-store";
+import { useAPIConfigStore } from "@/stores/api-config-store";
 import { getFeatureConfig, getFeatureNotConfiguredMessage } from "@/lib/ai/feature-router";
 import { generateShotImage, generateShotVideo, batchGenerateShotImages } from "@/lib/script/shot-generator";
 import type { Shot } from "@/types/script";
@@ -104,17 +105,23 @@ export function ShotList({ projectId, shots, styleId }: ShotListProps) {
 
   // Handle single shot image generation
   const handleGenerateImage = useCallback(async (shot: Shot) => {
-    const imageConfig = getFeatureConfig('character_generation');
-    if (!imageConfig) {
-      toast.error(getFeatureNotConfiguredMessage('character_generation'));
-      return;
-    }
-    const apiKey = imageConfig.apiKey;
-    const baseUrl = imageConfig.baseUrl?.replace(/\/+$/, '');
-    const model = imageConfig.models?.[0];
-    if (!apiKey || !baseUrl || !model) {
-      toast.error(getFeatureNotConfiguredMessage('character_generation'));
-      return;
+    const generationBackend = useAPIConfigStore.getState().generationBackend;
+    let apiKey = '';
+    let baseUrl = '';
+    let model = '';
+    if (generationBackend !== 'playwright') {
+      const imageConfig = getFeatureConfig('character_generation');
+      if (!imageConfig) {
+        toast.error(getFeatureNotConfiguredMessage('character_generation'));
+        return;
+      }
+      apiKey = imageConfig.apiKey;
+      baseUrl = imageConfig.baseUrl?.replace(/\/+$/, '') || '';
+      model = imageConfig.models?.[0] || '';
+      if (!apiKey || !baseUrl || !model) {
+        toast.error(getFeatureNotConfiguredMessage('character_generation'));
+        return;
+      }
     }
     setGeneratingShotId(shot.id);
     updateShot(projectId, shot.id, { imageStatus: 'generating', imageProgress: 0 });
@@ -162,17 +169,23 @@ export function ShotList({ projectId, shots, styleId }: ShotListProps) {
       return;
     }
 
-    const videoConfig = getFeatureConfig('video_generation');
-    if (!videoConfig) {
-      toast.error(getFeatureNotConfiguredMessage('video_generation'));
-      return;
-    }
-    const apiKey = videoConfig.apiKey;
-    const baseUrl = videoConfig.baseUrl?.replace(/\/+$/, '');
-    const model = videoConfig.models?.[0];
-    if (!apiKey || !baseUrl || !model) {
-      toast.error(getFeatureNotConfiguredMessage('video_generation'));
-      return;
+    const generationBackend = useAPIConfigStore.getState().generationBackend;
+    let apiKey = '';
+    let baseUrl = '';
+    let model = '';
+    if (generationBackend !== 'playwright') {
+      const videoConfig = getFeatureConfig('video_generation');
+      if (!videoConfig) {
+        toast.error(getFeatureNotConfiguredMessage('video_generation'));
+        return;
+      }
+      apiKey = videoConfig.apiKey;
+      baseUrl = videoConfig.baseUrl?.replace(/\/+$/, '') || '';
+      model = videoConfig.models?.[0] || '';
+      if (!apiKey || !baseUrl || !model) {
+        toast.error(getFeatureNotConfiguredMessage('video_generation'));
+        return;
+      }
     }
     setGeneratingShotId(shot.id);
     updateShot(projectId, shot.id, { videoStatus: 'generating', videoProgress: 0 });
@@ -221,17 +234,23 @@ export function ShotList({ projectId, shots, styleId }: ShotListProps) {
       return;
     }
 
-    const imageConfig = getFeatureConfig('character_generation');
-    if (!imageConfig) {
-      toast.error(getFeatureNotConfiguredMessage('character_generation'));
-      return;
-    }
-    const apiKey = imageConfig.apiKey;
-    const baseUrl = imageConfig.baseUrl?.replace(/\/+$/, '');
-    const model = imageConfig.models?.[0];
-    if (!apiKey || !baseUrl || !model) {
-      toast.error(getFeatureNotConfiguredMessage('character_generation'));
-      return;
+    const generationBackend = useAPIConfigStore.getState().generationBackend;
+    let apiKey = '';
+    let baseUrl = '';
+    let model = '';
+    if (generationBackend !== 'playwright') {
+      const imageConfig = getFeatureConfig('character_generation');
+      if (!imageConfig) {
+        toast.error(getFeatureNotConfiguredMessage('character_generation'));
+        return;
+      }
+      apiKey = imageConfig.apiKey;
+      baseUrl = imageConfig.baseUrl?.replace(/\/+$/, '') || '';
+      model = imageConfig.models?.[0] || '';
+      if (!apiKey || !baseUrl || !model) {
+        toast.error(getFeatureNotConfiguredMessage('character_generation'));
+        return;
+      }
     }
     setIsGenerating(true);
 

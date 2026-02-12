@@ -65,6 +65,7 @@ import { submitGridImageRequest } from "@/lib/ai/image-generator";
 import { saveVideoToLocal, readImageAsBase64 } from '@/lib/image-storage';
 import { createMockImageDataUrl, createMockTaskId, isTestModeEnabled } from "@/lib/ai/test-mode";
 import { callVideoGenerationApi, isContentModerationError } from './use-video-generation';
+import { callImageGenerationApi } from './use-image-generation';
 import { persistSceneImage } from '@/lib/utils/image-persist';
 import {
   Select,
@@ -259,14 +260,6 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
   const { getApiKey, getProviderByPlatform, concurrency, generationBackend } = useAPIConfigStore();
   const { addMediaFromUrl, getOrCreateCategoryFolder } = useMediaStore();
 
-  const ensureProviderGenerationBackend = useCallback((): boolean => {
-    if (generationBackend === 'playwright') {
-      toast.error('当前已选择 Playwright 生成方式，分镜生成尚未接入该模式。请在设置中切回 Provider API。');
-      return false;
-    }
-    return true;
-  }, [generationBackend]);
-  
   // Get system category folder IDs for auto-saving (images → AI图片, videos → AI视频)
   const getImageFolderId = useCallback(() => getOrCreateCategoryFolder('ai-image'), [getOrCreateCategoryFolder]);
   const getVideoFolderId = useCallback(() => getOrCreateCategoryFolder('ai-video'), [getOrCreateCategoryFolder]);
@@ -606,7 +599,6 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
   // Handle quad grid generation
   const handleQuadGridGenerate = useCallback(async (variationType: QuadVariationType, useCharacterRef: boolean = false) => {
     if (!quadGridTarget) return;
-    if (!ensureProviderGenerationBackend()) return;
 
     const scene = splitScenes.find(s => s.id === quadGridTarget.sceneId);
     if (!scene) return;
@@ -883,7 +875,7 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
     } finally {
       setIsQuadGridGenerating(false);
     }
-  }, [quadGridTarget, splitScenes, storyboardConfig, getApiKey, getCharacterReferenceImages, ensureProviderGenerationBackend]);
+  }, [quadGridTarget, splitScenes, storyboardConfig, getApiKey, getCharacterReferenceImages]);
 
   // Apply quad grid result
   const handleApplyQuadGrid = useCallback(async (imageIndex: number) => {
@@ -1074,7 +1066,6 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
 
   // Handle generate videos - serial processing based on concurrency
   const handleGenerateVideos = useCallback(async () => {
-    if (!ensureProviderGenerationBackend()) return;
     if (splitScenes.length === 0) {
       toast.error("没有可生成的分镜");
       return;
@@ -1101,6 +1092,15 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
 
     if (scenesToGenerate.length === 0) {
       toast.info("所有分镜已生成或正在生成中");
+      return;
+    }
+
+    if (generationBackend === 'playwright') {
+      toast.info(`Playwright 模式开始生成 ${scenesToGenerate.length} 个视频...`);
+      for (const scene of scenesToGenerate) {
+        // 复用单分镜生成逻辑，确保与单次生成行为一致
+        await handleGenerateSingleVideo(scene.id);
+      }
       return;
     }
 
@@ -1256,12 +1256,11 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
     if (completedCount === splitScenes.length) {
       toast.success("所有视频生成完成！");
     }
-  }, [splitScenes, storyboardConfig, getApiKey, concurrency, updateSplitSceneVideo, ensureProviderGenerationBackend]);
+  }, [splitScenes, storyboardConfig, getApiKey, concurrency, updateSplitSceneVideo, generationBackend]);
 
 
   // Generate video for a single scene - directly calls API with key rotation
   const handleGenerateSingleVideo = useCallback(async (sceneId: number) => {
-    if (!ensureProviderGenerationBackend()) return;
     const scene = splitScenes.find(s => s.id === sceneId);
     if (!scene) return;
 
@@ -1508,23 +1507,36 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
       }
       const imageWithRoles: ImageWithRole[] = [];
 
-      // First frame (REQUIRED for i2v mode) - must have valid HTTP URL
+      // First frame (REQUIRED for i2v mode)
       const normalizedFirstFrame = normalizeUrl(firstFrameUrl);
       console.log('[SplitScenes] First frame URL (normalized):', normalizedFirstFrame?.substring(0, 80));
-      
-      const firstFrameConverted = await convertToHttpUrl(normalizedFirstFrame);
-      if (!firstFrameConverted) {
-        throw new Error('无法获取首帧图片的 HTTP URL，请重新生成图片');
+
+      const firstFrameForGeneration = generationBackend === 'playwright'
+        ? normalizedFirstFrame
+        : await convertToHttpUrl(normalizedFirstFrame);
+      if (!firstFrameForGeneration) {
+        throw new Error(
+          generationBackend === 'playwright'
+            ? '无法读取首帧图片，请重新生成图片'
+            : '无法获取首帧图片的 HTTP URL，请重新生成图片'
+        );
       }
-      imageWithRoles.push({ url: firstFrameConverted, role: 'first_frame' });
-      console.log('[SplitScenes] First frame HTTP URL:', firstFrameConverted.substring(0, 60));
+      imageWithRoles.push({ url: firstFrameForGeneration, role: 'first_frame' });
+      console.log(
+        '[SplitScenes] First frame URL for generation:',
+        firstFrameForGeneration.substring(0, 60),
+        generationBackend === 'playwright' ? '(playwright raw)' : '(provider http)'
+      );
 
       // Last frame (optional)
       if (lastFrameUrl) {
-        const lastFrameConverted = await convertToHttpUrl(lastFrameUrl);
-        if (lastFrameConverted) {
-          imageWithRoles.push({ url: lastFrameConverted, role: 'last_frame' });
-          console.log('[SplitScenes] Last frame HTTP URL:', lastFrameConverted.substring(0, 60));
+        const normalizedLastFrame = normalizeUrl(lastFrameUrl);
+        const lastFrameForGeneration = generationBackend === 'playwright'
+          ? normalizedLastFrame
+          : await convertToHttpUrl(normalizedLastFrame);
+        if (lastFrameForGeneration) {
+          imageWithRoles.push({ url: lastFrameForGeneration, role: 'last_frame' });
+          console.log('[SplitScenes] Last frame URL for generation:', lastFrameForGeneration.substring(0, 60));
         }
       }
 
@@ -1644,11 +1656,10 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
 
     setIsGenerating(false);
     setCurrentGeneratingId(null);
-  }, [splitScenes, storyboardConfig, getApiKey, updateSplitSceneVideo, autoSaveVideoToLibrary, buildEmotionDescription, getCharacterReferenceImages, ensureProviderGenerationBackend]);
+  }, [splitScenes, storyboardConfig, getApiKey, updateSplitSceneVideo, autoSaveVideoToLibrary, buildEmotionDescription, getCharacterReferenceImages, generationBackend]);
 
   // Generate image for a single scene using image API
   const handleGenerateSingleImage = useCallback(async (sceneId: number) => {
-    if (!ensureProviderGenerationBackend()) return;
     const scene = splitScenes.find(s => s.id === sceneId);
     if (!scene) return;
 
@@ -1731,6 +1742,22 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
         model,
         imageBaseUrl,
       });
+
+      if (generationBackend === 'playwright') {
+        const result = await callImageGenerationApi(
+          apiKey,
+          enhancedPrompt,
+          storyboardConfig.aspectRatio || '9:16',
+          referenceImages,
+          (progress) => updateSplitSceneImageStatus(sceneId, { imageProgress: progress })
+        );
+        const persistResult = await persistSceneImage(result.imageUrl, sceneId, 'first');
+        updateSplitSceneImage(sceneId, persistResult.localPath, scene.width, scene.height, persistResult.httpUrl || result.httpUrl);
+        autoSaveImageToLibrary(sceneId, persistResult.localPath);
+        toast.success(`分镜 ${sceneId + 1} 图片生成完成，已保存到素材库`);
+        setIsGenerating(false);
+        return;
+      }
 
       // 使用服务映射配置的模型和端点
       const requestBody: any = {
@@ -1904,7 +1931,7 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
     }
 
     setIsGenerating(false);
-  }, [splitScenes, storyboardConfig, storyboardImage, getApiKey, updateSplitSceneImage, updateSplitSceneImageStatus, autoSaveImageToLibrary, getCharacterReferenceImages, ensureProviderGenerationBackend]);
+  }, [splitScenes, storyboardConfig, storyboardImage, getApiKey, updateSplitSceneImage, updateSplitSceneImageStatus, autoSaveImageToLibrary, getCharacterReferenceImages, generationBackend]);
 
   // ===== Utilities for 合并生成（九宫格） =====
   type Angle = 'Back View' | 'Over-the-Shoulder (OTS)' | 'POV' | 'Low Angle (Heroic)' | 'High Angle (Vulnerable)' | 'Dutch Angle (Tilted)';
@@ -1997,7 +2024,6 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
   };
 
   const handleMergedGenerate = useCallback(async (mode: 'first'|'last'|'both', strategy: 'cluster'|'minimal'|'none' = 'cluster', exemplar: boolean = true) => {
-    if (!ensureProviderGenerationBackend()) return;
     if (splitScenes.length === 0) {
       toast.error('没有可生成的分镜');
       return;
@@ -2508,7 +2534,7 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
       setIsMergedRunning(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [splitScenes, storyboardConfig, getApiKey, updateSplitSceneImage, updateSplitSceneImageStatus, updateSplitSceneEndFrame, updateSplitSceneEndFrameStatus, ensureProviderGenerationBackend]);
+  }, [splitScenes, storyboardConfig, getApiKey, updateSplitSceneImage, updateSplitSceneImageStatus, updateSplitSceneEndFrame, updateSplitSceneEndFrameStatus]);
 
   // 复用单图生成的 API 路径，封装为通用函数（支持首帧/尾帧）
   // 合并生成专用：使用预计算参考列表；不降级到单图通道
@@ -2630,7 +2656,6 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
   // Generate end frame image for a single scene using image API
   // Reuses the same API config as first frame generation
   const handleGenerateEndFrameImage = useCallback(async (sceneId: number) => {
-    if (!ensureProviderGenerationBackend()) return;
     const scene = splitScenes.find(s => s.id === sceneId);
     if (!scene) return;
 
@@ -2712,6 +2737,30 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
         prompt: enhancedPrompt.substring(0, 100),
         referenceCount: referenceImages.length,
       });
+
+      if (generationBackend === 'playwright') {
+        const result = await callImageGenerationApi(
+          apiKey,
+          enhancedPrompt,
+          storyboardConfig.aspectRatio || '9:16',
+          referenceImages,
+          (progress) => updateSplitSceneEndFrameStatus(sceneId, { endFrameProgress: progress })
+        );
+        const persistResult = await persistSceneImage(result.imageUrl, sceneId, 'end');
+        updateSplitSceneEndFrame(sceneId, persistResult.localPath, 'ai-generated', persistResult.httpUrl || result.httpUrl);
+        const folderId = getImageFolderId();
+        addMediaFromUrl({
+          url: persistResult.localPath,
+          name: `分镜 ${sceneId + 1} - 尾帧`,
+          type: 'image',
+          source: 'ai-image',
+          folderId,
+          projectId: mediaProjectId,
+        });
+        toast.success(`分镜 ${sceneId + 1} 尾帧生成完成，已保存到素材库`);
+        setIsGenerating(false);
+        return;
+      }
 
       // Call image generation API
       const requestBody: any = {
@@ -2880,7 +2929,7 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
     }
 
     setIsGenerating(false);
-  }, [splitScenes, storyboardConfig, getApiKey, updateSplitSceneEndFrame, updateSplitSceneEndFrameStatus, getCharacterReferenceImages, ensureProviderGenerationBackend]);
+  }, [splitScenes, storyboardConfig, getApiKey, updateSplitSceneEndFrame, updateSplitSceneEndFrameStatus, getCharacterReferenceImages, generationBackend]);
 
   // Save to media library (image or video) - uses system category folders
   const handleSaveToLibrary = useCallback(async (scene: SplitScene, type: 'image' | 'video') => {

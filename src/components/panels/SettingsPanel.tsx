@@ -845,6 +845,11 @@ export function SettingsPanel() {
               <p className="text-xs text-muted-foreground">
                 二选一全局生效。当前：{generationBackend === 'provider' ? 'Provider API' : 'Playwright'}
               </p>
+              {generationBackend === 'playwright' && (
+                <p className="text-xs text-muted-foreground">
+                  Playwright 模式需要本机可用 `npx`，首次会打开 Gemini 页面，请先登录 Google 账号。
+                </p>
+              )}
             </div>
 
             {/* Concurrency */}

@@ -6,6 +6,7 @@ import { useAPIConfigStore } from "@/stores/api-config-store";
 import { getFeatureConfig } from "@/lib/ai/feature-router";
 import { imageUrlToBase64 } from "@/lib/ai/image-generator";
 import { readImageAsBase64 } from "@/lib/image-storage";
+import { generateGeminiImageViaPlaywright } from "@/lib/playwright/gemini-web-generator";
 import type { SplitScene, ShotSizeType } from "@/stores/director-store";
 
 // Helper to normalize URL (handle array format)
@@ -80,14 +81,23 @@ export async function callImageGenerationApi(
 ): Promise<{ imageUrl: string; httpUrl: string }> {
   const generationBackend = useAPIConfigStore.getState().generationBackend;
   if (generationBackend === 'playwright') {
-    throw new Error('当前已选择 Playwright 生成方式，但图片生成功能尚未接入该方式。请在设置中切回 Provider API。');
+    onProgress?.(15);
+    const dataUrl = await generateGeminiImageViaPlaywright({
+      prompt,
+      aspectRatio,
+      referenceImageUrl: referenceImages[0],
+    });
+    onProgress?.(100);
+    return {
+      imageUrl: dataUrl,
+      httpUrl: dataUrl,
+    };
   }
 
   const featureConfig = getImageApiConfig();
   if (!featureConfig) {
     throw new Error('请先在设置中配置图片生成服务映射');
   }
-  const platform = featureConfig.platform;
   const model = featureConfig.models?.[0];
   if (!model) {
     throw new Error('请先在设置中配置图片生成模型');

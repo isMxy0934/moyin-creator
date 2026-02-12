@@ -18,6 +18,10 @@ import type {
   SceneCompletedEvent,
   SceneFailedEvent,
 } from '@opencut/ai-core';
+import {
+  generateGeminiImageViaPlaywright,
+  generateGeminiVideoViaPlaywright,
+} from '@/lib/playwright/gemini-web-generator';
 
 type PromiseCallbacks = {
   resolve: (value: unknown) => void;
@@ -232,7 +236,12 @@ export class AIWorkerBridge {
   }
 
   private handleWorkerMessage(e: MessageEvent<WorkerEvent>): void {
-    const event = e.data;
+    const event = e.data as WorkerEvent | { type: string; payload?: any };
+
+    if (event.type === 'PLAYWRIGHT_BRIDGE_REQUEST') {
+      void this.handlePlaywrightBridgeRequest(event.payload);
+      return;
+    }
 
     switch (event.type) {
       case 'WORKER_READY':
@@ -313,6 +322,48 @@ export class AIWorkerBridge {
 
       default:
         console.warn('[WorkerBridge] Unhandled event type:', (event as WorkerEvent).type);
+    }
+  }
+
+  private async handlePlaywrightBridgeRequest(payload: any): Promise<void> {
+    const requestId = payload?.requestId;
+    if (!requestId || !this.worker) return;
+
+    try {
+      let dataUrl = '';
+      if (payload.mediaType === 'video') {
+        dataUrl = await generateGeminiVideoViaPlaywright({
+          prompt: payload.prompt || '',
+          aspectRatio: payload.aspectRatio || '16:9',
+          firstFrameUrl: payload.firstFrameUrl,
+          timeoutMs: payload.timeoutMs,
+        });
+      } else {
+        dataUrl = await generateGeminiImageViaPlaywright({
+          prompt: payload.prompt || '',
+          aspectRatio: payload.aspectRatio || '1:1',
+          referenceImageUrl: payload.referenceImageUrl,
+          timeoutMs: payload.timeoutMs,
+        });
+      }
+
+      this.worker.postMessage({
+        type: 'PLAYWRIGHT_BRIDGE_RESPONSE',
+        payload: {
+          requestId,
+          success: true,
+          dataUrl,
+        },
+      });
+    } catch (error) {
+      this.worker.postMessage({
+        type: 'PLAYWRIGHT_BRIDGE_RESPONSE',
+        payload: {
+          requestId,
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
     }
   }
 

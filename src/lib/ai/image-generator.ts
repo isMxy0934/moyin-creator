@@ -11,6 +11,7 @@ import { getFeatureConfig, getFeatureNotConfiguredMessage } from '@/lib/ai/featu
 import { retryOperation } from '@/lib/utils/retry';
 import { resolveImageApiFormat } from '@/lib/api-key-manager';
 import { useAPIConfigStore } from '@/stores/api-config-store';
+import { generateGeminiImageViaPlaywright } from '@/lib/playwright/gemini-web-generator';
 import {
   createMockImageDataUrl,
   isTestModeEnabled,
@@ -223,6 +224,17 @@ async function generateImage(
         label: 'Scene Image (Test Mode)',
       }),
     };
+  }
+
+  const generationBackend = useAPIConfigStore.getState().generationBackend;
+  if (generationBackend === 'playwright') {
+    const imageUrl = await generateGeminiImageViaPlaywright({
+      prompt: params.prompt,
+      aspectRatio: params.aspectRatio || '1:1',
+      referenceImageUrl: params.referenceImages?.[0],
+      timeoutMs: 8 * 60 * 1000,
+    });
+    return { imageUrl };
   }
 
   const featureConfig = getFeatureConfig(feature);
@@ -658,6 +670,17 @@ export async function submitGridImageRequest(params: {
         label: 'Grid Image (Test Mode)',
       }),
     };
+  }
+
+  const generationBackend = useAPIConfigStore.getState().generationBackend;
+  if (generationBackend === 'playwright') {
+    const imageUrl = await generateGeminiImageViaPlaywright({
+      prompt,
+      aspectRatio,
+      referenceImageUrl: referenceImages?.[0],
+      timeoutMs: 8 * 60 * 1000,
+    });
+    return { imageUrl };
   }
 
   const normalizedBase = baseUrl.replace(/\/+$/, '');

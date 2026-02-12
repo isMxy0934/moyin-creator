@@ -5,6 +5,7 @@ import { getFeatureConfig } from "@/lib/ai/feature-router";
 import { saveVideoToLocal } from "@/lib/image-storage";
 import { normalizeUrl } from "./use-image-generation";
 import { useAPIConfigStore } from "@/stores/api-config-store";
+import { generateGeminiVideoViaPlaywright } from "@/lib/playwright/gemini-web-generator";
 import {
   createMockImageDataUrl,
   createMockTaskId,
@@ -368,7 +369,16 @@ export async function callVideoGenerationApi(
   }
 
   if (generationBackend === 'playwright') {
-    throw new Error('当前已选择 Playwright 生成方式，但视频生成功能尚未接入该方式。请在设置中切回 Provider API。');
+    const firstFrame = imageWithRoles.find((item) => item.role === 'first_frame')?.url;
+    onProgress?.(20);
+    const dataUrl = await generateGeminiVideoViaPlaywright({
+      prompt,
+      aspectRatio,
+      firstFrameUrl: firstFrame,
+      timeoutMs: 12 * 60 * 1000,
+    });
+    onProgress?.(100);
+    return dataUrl;
   }
 
   const model = featureConfig?.models?.[0];

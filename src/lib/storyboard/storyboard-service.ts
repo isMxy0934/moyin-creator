@@ -14,6 +14,7 @@ import { retryOperation } from "@/lib/utils/retry";
 import { delay, RATE_LIMITS } from "@/lib/utils/rate-limiter";
 import { submitGridImageRequest } from '@/lib/ai/image-generator';
 import { createMockImageDataUrl, createMockVideoUrl, waitForTestModeLatency } from '@/lib/ai/test-mode';
+import { generateGeminiImageViaPlaywright, generateGeminiVideoViaPlaywright } from '@/lib/playwright/gemini-web-generator';
 
 export interface StoryboardGenerationConfig {
   storyPrompt: string;
@@ -170,7 +171,7 @@ async function pollApimartTaskStatus(
   apiKey: string,
   onProgress?: (progress: number) => void,
   type: 'image' | 'video' = 'image',
-  baseUrl: string
+  baseUrl: string = 'https://api.apimart.cn/v1'
 ): Promise<string> {
   const maxAttempts = 120;
   const pollInterval = 2000;
@@ -359,7 +360,22 @@ export async function generateStoryboardImage(
   }
 
   if (generationBackend === 'playwright') {
-    throw new Error('当前已选择 Playwright 生成方式，但故事板生成功能尚未接入该方式。请在设置中切回 Provider API。');
+    onProgress?.(20);
+    const imageUrl = await generateGeminiImageViaPlaywright({
+      prompt,
+      aspectRatio,
+      timeoutMs: 8 * 60 * 1000,
+    });
+    onProgress?.(100);
+    return {
+      imageUrl,
+      gridConfig: {
+        cols: gridConfig.cols,
+        rows: gridConfig.rows,
+        cellWidth: gridConfig.cellWidth,
+        cellHeight: gridConfig.cellHeight,
+      },
+    };
   }
 
   // Validate API key
@@ -564,7 +580,7 @@ async function pollApimartVideoTaskStatus(
   taskId: string,
   apiKey: string,
   onProgress?: (progress: number) => void,
-  baseUrl: string
+  baseUrl: string = 'https://api.apimart.cn/v1'
 ): Promise<string> {
   // Use the unified polling function with video type and dynamic baseUrl
   return pollApimartTaskStatus(taskId, apiKey, onProgress, 'video', baseUrl);
@@ -614,7 +630,25 @@ export async function generateSceneVideos(
   }
 
   if (generationBackend === 'playwright' && !mockMode) {
-    throw new Error('当前已选择 Playwright 生成方式，但视频生成功能尚未接入该方式。请在设置中切回 Provider API。');
+    for (let i = 0; i < scenes.length; i++) {
+      const scene = scenes[i];
+      try {
+        onSceneProgress?.(scene.id, 10);
+        const videoUrl = await generateGeminiVideoViaPlaywright({
+          prompt: scene.videoPrompt,
+          aspectRatio,
+          firstFrameUrl: scene.imageDataUrl,
+          timeoutMs: 12 * 60 * 1000,
+        });
+        results.set(scene.id, videoUrl);
+        onSceneProgress?.(scene.id, 100);
+        onSceneComplete?.(scene.id, videoUrl);
+      } catch (error) {
+        const err = error as Error;
+        onSceneFailed?.(scene.id, err.message);
+      }
+    }
+    return results;
   }
 
   // Process scenes sequentially with rate limiting

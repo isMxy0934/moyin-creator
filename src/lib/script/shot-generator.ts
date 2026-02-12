@@ -9,6 +9,11 @@
 import type { Shot } from "@/types/script";
 import { retryOperation } from "@/lib/utils/retry";
 import { delay, RATE_LIMITS } from "@/lib/utils/rate-limiter";
+import { useAPIConfigStore } from "@/stores/api-config-store";
+import {
+  generateGeminiImageViaPlaywright,
+  generateGeminiVideoViaPlaywright,
+} from "@/lib/playwright/gemini-web-generator";
 
 const buildEndpoint = (baseUrl: string, path: string) => {
   const normalized = baseUrl.replace(/\/+$/, '');
@@ -138,16 +143,6 @@ export async function generateShotImage(
 ): Promise<string> {
   const { apiKey, baseUrl, model, aspectRatio = '16:9', styleTokens = [], referenceImages = [] } = config;
 
-  if (!apiKey) {
-    throw new Error('API Key is required');
-  }
-  if (!baseUrl) {
-    throw new Error('Base URL is required');
-  }
-  if (!model) {
-    throw new Error('Model is required');
-  }
-
   // Build prompt from shot data (prefer calibrated imagePrompt from three-tier system)
   let prompt = shot.imagePrompt || shot.visualPrompt || shot.actionSummary;
   
@@ -160,6 +155,29 @@ export async function generateShotImage(
   prompt = `cinematic, highly detailed, 8k resolution, professional lighting, ${prompt}`;
 
   console.log('[ShotGenerator] Generating image for shot:', shot.id, prompt.substring(0, 100));
+
+  const generationBackend = useAPIConfigStore.getState().generationBackend;
+  if (generationBackend === 'playwright') {
+    onProgress?.(20);
+    const imageUrl = await generateGeminiImageViaPlaywright({
+      prompt,
+      aspectRatio,
+      referenceImageUrl: referenceImages[0],
+      timeoutMs: 8 * 60 * 1000,
+    });
+    onProgress?.(100);
+    return imageUrl;
+  }
+
+  if (!apiKey) {
+    throw new Error('API Key is required');
+  }
+  if (!baseUrl) {
+    throw new Error('Base URL is required');
+  }
+  if (!model) {
+    throw new Error('Model is required');
+  }
 
   const requestData: Record<string, unknown> = {
     model,
@@ -239,6 +257,19 @@ export async function generateShotVideo(
   onProgress?: (progress: number) => void
 ): Promise<string> {
   const { apiKey, baseUrl, model, aspectRatio = '16:9', referenceImages = [] } = config;
+
+  const generationBackend = useAPIConfigStore.getState().generationBackend;
+  if (generationBackend === 'playwright') {
+    onProgress?.(20);
+    const videoUrl = await generateGeminiVideoViaPlaywright({
+      prompt: shot.videoPrompt || shot.actionSummary,
+      aspectRatio,
+      firstFrameUrl: imageUrl,
+      timeoutMs: 12 * 60 * 1000,
+    });
+    onProgress?.(100);
+    return videoUrl;
+  }
 
   if (!apiKey) {
     throw new Error('API Key is required');

@@ -69,6 +69,23 @@ interface TaskStatusResponse {
   error?: string;
 }
 
+interface PlaywrightBridgeRequestPayload {
+  requestId: string;
+  mediaType: 'image' | 'video';
+  prompt: string;
+  aspectRatio?: string;
+  referenceImageUrl?: string;
+  firstFrameUrl?: string;
+  timeoutMs?: number;
+}
+
+interface PlaywrightBridgeResponsePayload {
+  requestId: string;
+  success: boolean;
+  dataUrl?: string;
+  error?: string;
+}
+
 // Prompt compiler instance
 const promptCompiler = new PromptCompiler();
 
@@ -78,11 +95,24 @@ const taskPoller = new TaskPoller();
 // ==================== State ====================
 
 let cancelled = false;
+const playwrightBridgeRequests = new Map<
+  string,
+  {
+    resolve: (value: string) => void;
+    reject: (error: Error) => void;
+    timeout: number;
+  }
+>();
 
 // ==================== Message Handler ====================
 
-self.onmessage = async (e: MessageEvent<WorkerCommand>) => {
-  const command = e.data;
+self.onmessage = async (e: MessageEvent<WorkerCommand | { type: string; payload?: any }>) => {
+  const command = e.data as WorkerCommand | { type: string; payload?: any };
+
+  if (command.type === 'PLAYWRIGHT_BRIDGE_RESPONSE') {
+    handlePlaywrightBridgeResponse(command.payload as PlaywrightBridgeResponsePayload);
+    return;
+  }
   
   try {
     switch (command.type) {
@@ -338,19 +368,62 @@ async function generateVideoViaProvider(
 }
 
 /**
- * Playwright backend placeholder.
- * Worker currently has no browser automation runtime; this branch is reserved for later integration.
+ * Request Playwright generation via bridge:
+ * worker -> renderer (worker-bridge) -> electron main -> playwright runner
  */
-async function generateImageViaPlaywright(): Promise<string> {
-  throw new Error('当前已选择 Playwright 生成方式，但 Worker 端尚未接入该执行链路。请在设置中切回 Provider API。');
+async function requestPlaywrightGeneration(payload: Omit<PlaywrightBridgeRequestPayload, 'requestId'>): Promise<string> {
+  const requestId = `pw_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+
+  return await new Promise<string>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      playwrightBridgeRequests.delete(requestId);
+      reject(new Error('Playwright bridge timeout'));
+    }, (payload.timeoutMs || 12 * 60 * 1000) + 30_000);
+
+    playwrightBridgeRequests.set(requestId, { resolve, reject, timeout });
+
+    self.postMessage({
+      type: 'PLAYWRIGHT_BRIDGE_REQUEST',
+      payload: {
+        requestId,
+        ...payload,
+      },
+    });
+  });
 }
 
 /**
- * Playwright backend placeholder.
- * Worker currently has no browser automation runtime; this branch is reserved for later integration.
+ * Generate image via Playwright bridge
  */
-async function generateVideoViaPlaywright(): Promise<string> {
-  throw new Error('当前已选择 Playwright 生成方式，但 Worker 端尚未接入该执行链路。请在设置中切回 Provider API。');
+async function generateImageViaPlaywright(
+  prompt: string,
+  config: Partial<GenerationConfig> & { apiKey?: string },
+  referenceImages?: string[]
+): Promise<string> {
+  return await requestPlaywrightGeneration({
+    mediaType: 'image',
+    prompt,
+    aspectRatio: config.aspectRatio || '9:16',
+    referenceImageUrl: referenceImages?.[0],
+    timeoutMs: 8 * 60 * 1000,
+  });
+}
+
+/**
+ * Generate video via Playwright bridge
+ */
+async function generateVideoViaPlaywright(
+  imageUrl: string,
+  prompt: string,
+  config: Partial<GenerationConfig> & { apiKey?: string }
+): Promise<string> {
+  return await requestPlaywrightGeneration({
+    mediaType: 'video',
+    prompt,
+    aspectRatio: config.aspectRatio || '9:16',
+    firstFrameUrl: imageUrl,
+    timeoutMs: 12 * 60 * 1000,
+  });
 }
 
 /**
@@ -365,7 +438,10 @@ async function generateImage(
 ): Promise<string> {
   const backend = getMediaGenerationBackend(config);
   if (backend === 'playwright') {
-    return generateImageViaPlaywright();
+    const promptWithConstraint = negativePrompt
+      ? `${prompt}\n\nNegative constraints: ${negativePrompt}`
+      : prompt;
+    return generateImageViaPlaywright(promptWithConstraint, config, referenceImages);
   }
   return generateImageViaProvider(prompt, negativePrompt, config, onProgress, referenceImages);
 }
@@ -382,7 +458,7 @@ async function generateVideo(
 ): Promise<string> {
   const backend = getMediaGenerationBackend(config);
   if (backend === 'playwright') {
-    return generateVideoViaPlaywright();
+    return generateVideoViaPlaywright(imageUrl, prompt, config);
   }
   return generateVideoViaProvider(imageUrl, prompt, config, onProgress, referenceImages);
 }
@@ -1248,6 +1324,21 @@ function handleCancel(command: CancelCommand): void {
   setTimeout(() => {
     cancelled = false;
   }, 100);
+}
+
+function handlePlaywrightBridgeResponse(payload: PlaywrightBridgeResponsePayload): void {
+  const request = playwrightBridgeRequests.get(payload.requestId);
+  if (!request) return;
+
+  clearTimeout(request.timeout);
+  playwrightBridgeRequests.delete(payload.requestId);
+
+  if (payload.success && payload.dataUrl) {
+    request.resolve(payload.dataUrl);
+    return;
+  }
+
+  request.reject(new Error(payload.error || 'Playwright bridge failed'));
 }
 
 // ==================== Helpers ====================

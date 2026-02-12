@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import https from 'node:https'
 import http from 'node:http'
 import os from 'node:os'
+import { spawn } from 'node:child_process'
 
 type HttpProxyRequest = {
   url: string
@@ -22,6 +23,24 @@ type HttpProxyResponse = {
   headers: Record<string, string>
   body: string
   error?: string
+}
+
+type GeminiPlaywrightRequest = {
+  mediaType: 'image' | 'video'
+  prompt: string
+  aspectRatio?: string
+  referenceImageDataUrl?: string
+  firstFrameDataUrl?: string
+  timeoutMs?: number
+}
+
+type GeminiPlaywrightResult = {
+  success: boolean
+  dataUrl?: string
+  mimeType?: string
+  sourceUrl?: string
+  error?: string
+  logs?: string
 }
 
 // electron-vite 构建后的目录结构
@@ -462,6 +481,158 @@ const downloadImage = (url: string, filePath: string): Promise<void> => {
   })
 }
 
+function parseDataUrl(input: string): { mimeType: string; buffer: Buffer } | null {
+  const matched = input.match(/^data:([^;]+);base64,(.+)$/s)
+  if (!matched) return null
+  const mimeType = matched[1] || 'application/octet-stream'
+  const base64 = matched[2] || ''
+  if (!base64) return null
+  return {
+    mimeType,
+    buffer: Buffer.from(base64, 'base64'),
+  }
+}
+
+function mimeToExtension(mimeType: string): string {
+  const map: Record<string, string> = {
+    'image/png': '.png',
+    'image/jpeg': '.jpg',
+    'image/webp': '.webp',
+    'video/mp4': '.mp4',
+    'video/webm': '.webm',
+    'video/quicktime': '.mov',
+  }
+  return map[mimeType.toLowerCase()] || '.bin'
+}
+
+function resolveAppRootPath(...segments: string[]): string {
+  const appRoot = process.env.APP_ROOT || path.join(__dirname, '../..')
+  return path.join(appRoot, ...segments)
+}
+
+async function runGeminiPlaywright(request: GeminiPlaywrightRequest): Promise<GeminiPlaywrightResult> {
+  const tempRoot = path.join(os.tmpdir(), 'mumu-gemini-playwright')
+  ensureDir(tempRoot)
+
+  const runId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  const runDir = path.join(tempRoot, runId)
+  ensureDir(runDir)
+
+  const inputPath = path.join(runDir, 'input.json')
+  const outputPath = path.join(runDir, 'output.json')
+  const logPath = path.join(runDir, 'runner.log')
+
+  let firstFramePath: string | undefined
+  if (request.firstFrameDataUrl) {
+    const parsed = parseDataUrl(request.firstFrameDataUrl)
+    if (!parsed) {
+      return { success: false, error: '首帧数据格式无效（需要 data URL）' }
+    }
+    const ext = mimeToExtension(parsed.mimeType)
+    firstFramePath = path.join(runDir, `first-frame${ext}`)
+    fs.writeFileSync(firstFramePath, parsed.buffer)
+  }
+
+  let referenceImagePath: string | undefined
+  if (request.referenceImageDataUrl) {
+    const parsed = parseDataUrl(request.referenceImageDataUrl)
+    if (!parsed) {
+      return { success: false, error: '参考图数据格式无效（需要 data URL）' }
+    }
+    const ext = mimeToExtension(parsed.mimeType)
+    referenceImagePath = path.join(runDir, `reference-image${ext}`)
+    fs.writeFileSync(referenceImagePath, parsed.buffer)
+  }
+
+  const runnerInput = {
+    mediaType: request.mediaType,
+    prompt: request.prompt,
+    aspectRatio: request.aspectRatio || '16:9',
+    referenceImagePath,
+    firstFramePath,
+    timeoutMs: request.timeoutMs || (request.mediaType === 'video' ? 12 * 60_000 : 6 * 60_000),
+    profileDir: path.join(app.getPath('userData'), 'playwright-gemini-profile'),
+    logPath,
+  }
+  fs.writeFileSync(inputPath, JSON.stringify(runnerInput, null, 2), 'utf-8')
+
+  const runnerScript = resolveAppRootPath('scripts', 'gemini-playwright-runner.cjs')
+  if (!fs.existsSync(runnerScript)) {
+    return { success: false, error: `Gemini Playwright runner 不存在: ${runnerScript}` }
+  }
+
+  const commandArgs = [
+    '--yes',
+    '--package',
+    'playwright',
+    'node',
+    runnerScript,
+    '--input',
+    inputPath,
+    '--output',
+    outputPath,
+  ]
+
+  const stdoutChunks: string[] = []
+  const stderrChunks: string[] = []
+  const child = spawn('npx', commandArgs, {
+    cwd: process.env.APP_ROOT || path.join(__dirname, '../..'),
+    env: { ...process.env },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+
+  child.stdout.on('data', (chunk) => stdoutChunks.push(String(chunk)))
+  child.stderr.on('data', (chunk) => stderrChunks.push(String(chunk)))
+
+  const timeoutMs = runnerInput.timeoutMs + 30_000
+  const timeout = setTimeout(() => {
+    child.kill('SIGTERM')
+  }, timeoutMs)
+
+  const exitCode = await new Promise<number>((resolve) => {
+    let settled = false
+    const done = (code: number) => {
+      if (settled) return
+      settled = true
+      resolve(code)
+    }
+    child.on('error', (error) => {
+      stderrChunks.push(String(error))
+      done(1)
+    })
+    child.on('close', (code) => done(code ?? 1))
+  })
+  clearTimeout(timeout)
+
+  if (!fs.existsSync(outputPath)) {
+    const stderr = stderrChunks.join('').trim()
+    const stdout = stdoutChunks.join('').trim()
+    return {
+      success: false,
+      error: stderr || stdout || `Gemini Playwright 执行失败 (exit=${exitCode})`,
+      logs: `${stdout}\n${stderr}`.trim(),
+    }
+  }
+
+  try {
+    const raw = fs.readFileSync(outputPath, 'utf-8')
+    const parsed = JSON.parse(raw) as GeminiPlaywrightResult
+    if (!parsed.success) {
+      const mergedLogs = parsed.logs || (fs.existsSync(logPath) ? fs.readFileSync(logPath, 'utf-8') : undefined)
+      return {
+        ...parsed,
+        logs: mergedLogs,
+      }
+    }
+    return parsed
+  } catch (error) {
+    return {
+      success: false,
+      error: `Gemini Playwright 输出解析失败: ${String(error)}`,
+    }
+  }
+}
+
 // IPC handlers for image management
 ipcMain.handle('save-image', async (_event, { url, category, filename }) => {
   try {
@@ -496,6 +667,20 @@ ipcMain.handle('save-image', async (_event, { url, category, filename }) => {
     return { success: true, localPath: `local-image://${category}/${safeName}` }
   } catch (error) {
     console.error('Failed to save image:', error)
+    return { success: false, error: String(error) }
+  }
+})
+
+ipcMain.handle('gemini-playwright-generate', async (_event, payload: GeminiPlaywrightRequest) => {
+  try {
+    if (!payload?.prompt || !payload.mediaType) {
+      return { success: false, error: '缺少必要参数: prompt 或 mediaType' }
+    }
+
+    const result = await runGeminiPlaywright(payload)
+    return result
+  } catch (error) {
+    console.error('[GeminiPlaywright] Failed:', error)
     return { success: false, error: String(error) }
   }
 })
