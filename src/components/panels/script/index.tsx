@@ -116,7 +116,7 @@ export function ScriptView() {
     characters: allCharacters, 
     selectCharacter: selectLibraryCharacter,
   } = useCharacterLibraryStore();
-  const { setActiveTab, goToCharacterWithData, goToSceneWithData } = useMediaPanelStore();
+  const { setActiveTab, goToDirectorWithData, goToCharacterWithData, goToSceneWithData } = useMediaPanelStore();
 
   // 选中状态
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -173,6 +173,7 @@ export function ScriptView() {
     clearTrailer,
     addScenesFromScript,
     setStoryboardStatus,
+    setStoryboardConfig,
   } = useDirectorStore();
   const directorProject = useActiveDirectorProject();
   const trailerConfig = directorProject?.trailerConfig || null;
@@ -1518,14 +1519,94 @@ export function ScriptView() {
     photographyTechnique: shot.photographyTechnique,
   }), [mapScriptCharacterIdsToLibraryIds]);
 
+  const getScriptFallbackPrompt = useCallback(() => {
+    const sections: string[] = [];
+    const projectTitle = scriptData?.title || scriptProject?.projectBackground?.title;
+    if (projectTitle) sections.push(`项目：${projectTitle}`);
+    if (scriptData?.genre || scriptProject?.projectBackground?.genre) {
+      sections.push(`类型：${scriptData?.genre || scriptProject?.projectBackground?.genre}`);
+    }
+    if (scriptData?.logline) {
+      sections.push(`故事简介：${scriptData.logline}`);
+    } else if (scriptProject?.projectBackground?.outline) {
+      sections.push(`故事背景：${scriptProject.projectBackground.outline}`);
+    }
+
+    if (sections.length > 0) {
+      return sections.join("\n");
+    }
+
+    const raw = rawScript?.trim();
+    if (raw) return raw.slice(0, 500);
+    return "请基于已携带的剧本分镜，生成故事板并继续创作。";
+  }, [scriptData, scriptProject?.projectBackground, rawScript]);
+
+  const getShotCharacterNames = useCallback((shot: Shot) => {
+    const mappedByIds = (shot.characterIds || [])
+      .map((id) => scriptData?.characters.find((c) => c.id === id)?.name)
+      .filter((name): name is string => typeof name === "string" && name.length > 0);
+    const byNames = (shot.characterNames || []).filter((name): name is string => !!name);
+    return Array.from(new Set([...mappedByIds, ...byNames]));
+  }, [scriptData]);
+
+  const buildPendingStoryPromptForShot = useCallback((shot: Shot, scene?: ScriptScene) => {
+    const lines: string[] = [getScriptFallbackPrompt()];
+    if (scene) {
+      const sceneLabel = scene.name || scene.location || "未命名场景";
+      const sceneTime = scene.time ? `（${scene.time}）` : "";
+      lines.push(`目标场景：${sceneLabel}${sceneTime}`);
+    }
+    const shotSummary = shot.visualDescription || shot.actionSummary || shot.dialogue || "";
+    if (shotSummary) {
+      lines.push(`重点分镜：${shotSummary}`);
+    }
+    return lines.join("\n");
+  }, [getScriptFallbackPrompt]);
+
+  const buildPendingStoryPromptForScene = useCallback((scene: ScriptScene, sceneShots: Shot[]) => {
+    const lines: string[] = [getScriptFallbackPrompt()];
+    const sceneLabel = scene.name || scene.location || "未命名场景";
+    const sceneTime = scene.time ? `（${scene.time}）` : "";
+    lines.push(`目标场景：${sceneLabel}${sceneTime}`);
+    const keyMoments = sceneShots
+      .map((s) => s.visualDescription || s.actionSummary || s.dialogue || "")
+      .filter((text) => text.length > 0)
+      .slice(0, 3);
+    if (keyMoments.length > 0) {
+      lines.push(`关键内容：${keyMoments.join("；")}`);
+    }
+    return lines.join("\n");
+  }, [getScriptFallbackPrompt]);
+
   const handleGoToDirector = useCallback(
     (shotId: string) => {
+      const openDirector = (
+        storyPrompt: string,
+        characterNames: string[],
+        scene?: ScriptScene,
+      ) => {
+        setStoryboardConfig({ storyPrompt });
+        if (hasDirectorStoryboard) {
+          setActiveTab("director");
+          return;
+        }
+        goToDirectorWithData({
+          storyPrompt,
+          characterNames,
+          sceneLocation: scene?.location,
+          sceneTime: scene?.time,
+          sceneCount: 1,
+          styleId,
+          sourceType: "shot",
+        });
+      };
+
       // 查找分镜数据
       const shot = shots.find((s) => s.id === shotId);
       if (!shot) {
         // 没有可携带分镜时，回到导演输入故事步骤，避免停留在旧的编辑态
         setStoryboardStatus('idle');
-        setActiveTab("director");
+        openDirector(getScriptFallbackPrompt(), [], undefined);
         toast.info("未找到分镜，已跳转到 AI 导演输入故事");
         return;
       }
@@ -1534,13 +1615,15 @@ export function ScriptView() {
       const shotSceneId = shot.sceneRefId || shot.sceneId;
       const scene = scriptData?.scenes.find((s) => s.id === shotSceneId);
       const sceneToAdd = buildDirectorSceneFromShot(shot, scene);
+      const characterNames = getShotCharacterNames(shot);
+      const storyPrompt = buildPendingStoryPromptForShot(shot, scene);
 
       if (
         sceneToAdd.sourceShotId &&
         currentSplitScenes.some((s) => s.sourceShotId === sceneToAdd.sourceShotId)
       ) {
         setStoryboardStatus(hasDirectorStoryboard ? 'editing' : 'idle');
-        setActiveTab("director");
+        openDirector(storyPrompt, characterNames, scene);
         toast.info(
           hasDirectorStoryboard
             ? "该分镜已在导演编辑列表中，已跳转到编辑场景"
@@ -1551,24 +1634,46 @@ export function ScriptView() {
 
       addScenesFromScript([sceneToAdd]);
       setStoryboardStatus(hasDirectorStoryboard ? 'editing' : 'idle');
-      setActiveTab("director");
+      openDirector(storyPrompt, characterNames, scene);
       toast.success(
         hasDirectorStoryboard
           ? "已跳转到AI导演，分镜完整参数已携带"
           : "已跳转到AI导演输入故事，分镜已携带（点下一步进入编辑场景）"
       );
     },
-    [shots, scriptData, currentSplitScenes, hasDirectorStoryboard, addScenesFromScript, setActiveTab, setStoryboardStatus, buildDirectorSceneFromShot]
+    [shots, scriptData, styleId, currentSplitScenes, hasDirectorStoryboard, addScenesFromScript, setActiveTab, setStoryboardStatus, setStoryboardConfig, goToDirectorWithData, buildDirectorSceneFromShot, getScriptFallbackPrompt, getShotCharacterNames, buildPendingStoryPromptForShot]
   );
 
   // 从场景跳转到AI导演（整个场景的所有分镜）
   const handleGoToDirectorFromScene = useCallback(
     (sceneId: string) => {
+      const openDirector = (
+        storyPrompt: string,
+        characterNames: string[],
+        scene?: ScriptScene,
+        sceneCountForInput = 1,
+      ) => {
+        setStoryboardConfig({ storyPrompt });
+        if (hasDirectorStoryboard) {
+          setActiveTab("director");
+          return;
+        }
+        goToDirectorWithData({
+          storyPrompt,
+          characterNames,
+          sceneLocation: scene?.location,
+          sceneTime: scene?.time,
+          sceneCount: sceneCountForInput,
+          styleId,
+          sourceType: "scene",
+        });
+      };
+
       // 查找场景数据
       const scene = scriptData?.scenes.find((s) => s.id === sceneId);
       if (!scene) {
         setStoryboardStatus('idle');
-        setActiveTab("director");
+        openDirector(getScriptFallbackPrompt(), [], undefined);
         toast.info("未找到场景，已跳转到 AI 导演输入故事");
         return;
       }
@@ -1579,10 +1684,13 @@ export function ScriptView() {
       if (sceneShots.length === 0) {
         // 场景尚未生成分镜：进入导演输入故事，不直接进入编辑场景
         setStoryboardStatus('idle');
-        setActiveTab("director");
+        openDirector(buildPendingStoryPromptForScene(scene, []), [], scene, 1);
         toast.info("该场景暂无分镜，已跳转到 AI 导演输入故事");
         return;
       }
+
+      const sceneCharacterNames = Array.from(new Set(sceneShots.flatMap(getShotCharacterNames)));
+      const storyPrompt = buildPendingStoryPromptForScene(scene, sceneShots);
 
       const scenesToAdd = sceneShots.map((shot, idx) =>
         buildDirectorSceneFromShot(shot, scene, `${scene.name || scene.location} #${idx + 1}`)
@@ -1606,7 +1714,7 @@ export function ScriptView() {
       const skippedCount = scenesToAdd.length - dedupedScenes.length;
       if (dedupedScenes.length === 0) {
         setStoryboardStatus(hasDirectorStoryboard ? 'editing' : 'idle');
-        setActiveTab("director");
+        openDirector(storyPrompt, sceneCharacterNames, scene, sceneShots.length);
         toast.info(
           hasDirectorStoryboard
             ? `场景「${scene.name || scene.location}」分镜已在导演编辑列表中，已跳转到编辑场景`
@@ -1617,7 +1725,7 @@ export function ScriptView() {
 
       addScenesFromScript(dedupedScenes);
       setStoryboardStatus(hasDirectorStoryboard ? 'editing' : 'idle');
-      setActiveTab("director");
+      openDirector(storyPrompt, sceneCharacterNames, scene, sceneShots.length);
       if (hasDirectorStoryboard) {
         toast.success(
           `已跳转到AI导演，场景「${scene.name || scene.location}」新增 ${dedupedScenes.length} 个分镜` +
@@ -1631,7 +1739,7 @@ export function ScriptView() {
         );
       }
     },
-    [shots, scriptData, currentSplitScenes, hasDirectorStoryboard, addScenesFromScript, setActiveTab, setStoryboardStatus, buildDirectorSceneFromShot]
+    [shots, scriptData, styleId, currentSplitScenes, hasDirectorStoryboard, addScenesFromScript, setActiveTab, setStoryboardStatus, setStoryboardConfig, goToDirectorWithData, buildDirectorSceneFromShot, getScriptFallbackPrompt, getShotCharacterNames, buildPendingStoryPromptForScene]
   );
 
   // CRUD handlers - 封装projectId
