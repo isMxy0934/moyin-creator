@@ -7,10 +7,12 @@
  * Export View - Timeline visualization and export
  * Based on CineGen-AI StageExport.tsx
  */
+import { useState } from "react";
 
-import { useScriptStore, useActiveScriptProject } from "@/stores/script-store";
+import { useActiveScriptProject } from "@/stores/script-store";
 import { useActiveDirectorProject } from "@/stores/director-store";
 import { useProjectStore } from "@/stores/project-store";
+import { useSimpleTimelineStore } from "@/stores/simple-timeline-store";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,14 +24,24 @@ import {
   Clock,
   CheckCircle,
   BarChart3,
-  Clapperboard,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import {
+  exportEdl,
+  exportMasterPackage,
+  exportSingleMasterVideo,
+  exportXml,
+  resolveExportableVideoClips,
+} from "@/lib/director/export-service";
 
 export function ExportView() {
   const { activeProject } = useProjectStore();
   const scriptProject = useActiveScriptProject();
   const directorProject = useActiveDirectorProject();
+  const timelineClips = useSimpleTimelineStore((state) => state.clips);
+  const [isExportingMaster, setIsExportingMaster] = useState(false);
+  const [isExportingTimeline, setIsExportingTimeline] = useState(false);
 
   const shots = scriptProject?.shots || [];
   const splitScenes = directorProject?.splitScenes || [];
@@ -51,12 +63,63 @@ export function ExportView() {
   const completedItems = hasSplitScenes ? directorCompleted : scriptCompleted;
   const imageReadyItems = hasSplitScenes ? directorWithImage : scriptCompleted;
   const progress = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 0;
-  const imageProgress = totalItems > 0 ? Math.round((imageReadyItems / totalItems) * 100) : 0;
+  const exportableClips = resolveExportableVideoClips(splitScenes, timelineClips);
+  const hasAnyRenderableVideo = exportableClips.length > 0;
 
   // 估算时长：使用实际时长数据
   const estimatedDuration = hasSplitScenes
     ? splitScenes.reduce((acc, s) => acc + (s.duration || 5), 0)
     : shots.reduce((acc, s) => acc + (s.duration || 3), 0);
+
+  const projectName = scriptData?.title || activeProject?.name || "未命名项目";
+
+  const handleDownloadMaster = async () => {
+    if (!hasAnyRenderableVideo) {
+      toast.error("当前没有可导出的视频");
+      return;
+    }
+
+    try {
+      setIsExportingMaster(true);
+
+      if (exportableClips.length === 1) {
+        await exportSingleMasterVideo(projectName, exportableClips[0]);
+        toast.success("已导出主视频");
+        return;
+      }
+
+      toast.info(`基础导出：正在导出 ${exportableClips.length} 段视频素材和 manifest`);
+      await exportMasterPackage(projectName, exportableClips, (p) => {
+        if (p.current > 0 && p.current <= p.total) {
+          toast.info(`${p.message} (${p.current}/${p.total})`);
+        }
+      });
+      toast.success("导出完成（基础版：素材包）");
+    } catch (error) {
+      const err = error as Error;
+      toast.error(`导出失败: ${err.message}`);
+    } finally {
+      setIsExportingMaster(false);
+    }
+  };
+
+  const handleExportTimeline = () => {
+    if (!hasAnyRenderableVideo) {
+      toast.error("当前没有可导出的时间线数据");
+      return;
+    }
+    try {
+      setIsExportingTimeline(true);
+      exportEdl(projectName, exportableClips);
+      exportXml(projectName, exportableClips);
+      toast.success("已导出 EDL 和 XML");
+    } catch (error) {
+      const err = error as Error;
+      toast.error(`导出失败: ${err.message}`);
+    } finally {
+      setIsExportingTimeline(false);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full bg-background overflow-hidden">
@@ -217,24 +280,27 @@ export function ExportView() {
               {/* Action Buttons */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <Button
-                  disabled={progress < 100}
                   className={cn(
                     "h-12 font-bold text-xs uppercase tracking-widest transition-all",
-                    progress === 100
+                    hasAnyRenderableVideo
                       ? "bg-primary text-primary-foreground hover:bg-primary/90"
                       : "bg-muted text-muted-foreground cursor-not-allowed"
                   )}
+                  onClick={handleDownloadMaster}
+                  disabled={!hasAnyRenderableVideo || isExportingMaster}
                 >
                   <Download className="w-4 h-4 mr-2" />
-                  Download Master (.mp4)
+                  {isExportingMaster ? "导出中..." : "Download Master (.mp4)"}
                 </Button>
 
                 <Button
                   variant="outline"
                   className="h-12 font-bold text-xs uppercase tracking-widest"
+                  onClick={handleExportTimeline}
+                  disabled={!hasAnyRenderableVideo || isExportingTimeline}
                 >
                   <FileVideo className="w-4 h-4 mr-2" />
-                  Export EDL / XML
+                  {isExportingTimeline ? "导出中..." : "Export EDL / XML"}
                 </Button>
               </div>
             </div>

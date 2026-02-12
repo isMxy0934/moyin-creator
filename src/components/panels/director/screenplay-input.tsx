@@ -101,7 +101,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
   const { startScreenplayGeneration, setScreenplayError, config, updateConfig } = useDirectorStore();
   const { checkVideoGenerationKeys, checkChatKeys, isFeatureConfigured, getApiKey } = useAPIConfigStore();
   const { characters } = useCharacterLibraryStore();
-  const { resourceSharing } = useAppSettingsStore();
+  const { resourceSharing, testMode } = useAppSettingsStore();
   const { activeProjectId } = useProjectStore();
   const visibleCharacters = useMemo(() => {
     if (resourceSharing.shareCharacters) return characters;
@@ -343,7 +343,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
     }
 
     // Legacy workflow: Check API keys for chat
-    const chatReady = isFeatureConfigured('script_analysis') || checkChatKeys().isAllConfigured;
+    const chatReady = testMode.enabled || isFeatureConfigured('script_analysis') || checkChatKeys().isAllConfigured;
     if (!chatReady) {
       toast.error('请在设置中配置「剧本分析/对话」的服务映射');
       return;
@@ -373,8 +373,8 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
       const bridge = await initializeWorkerBridge();
       
       // Get API key and provider
-      const chatApiKey = getApiKey('zhipu') || getApiKey('openai');
-      const chatProvider = getApiKey('zhipu') ? 'zhipu' : 'openai';
+      const chatApiKey = testMode.enabled ? '' : (getApiKey('zhipu') || getApiKey('openai'));
+      const chatProvider = testMode.enabled ? 'mock' : (getApiKey('zhipu') ? 'zhipu' : 'openai');
       
       const screenplay = await bridge.generateScreenplay(fullPrompt, images, {
         aspectRatio,
@@ -383,6 +383,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
         styleTokens: actualStyleTokens,
         apiKey: chatApiKey,
         chatProvider,
+        mockMode: testMode.enabled,
         baseUrl: typeof window !== 'undefined' ? window.location.origin : '',
       } as any);
 
@@ -763,7 +764,7 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
       </div>
 
       {/* API status warning - for screenplay we only need chat API */}
-      {!isFeatureConfigured('script_analysis') && !checkChatKeys().isAllConfigured && (
+      {!testMode.enabled && !isFeatureConfigured('script_analysis') && !checkChatKeys().isAllConfigured && (
         <div className="flex items-start gap-2 p-2 rounded-md bg-yellow-500/10 border border-yellow-500/20">
           <AlertCircle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
           <div className="text-xs text-yellow-600 dark:text-yellow-400">
@@ -779,7 +780,12 @@ export function ScreenplayInput({ onGenerateStoryboard }: ScreenplayInputProps) 
       <div className="flex gap-2">
         <Button
           onClick={handleSubmit}
-          disabled={!prompt.trim() || isSubmitting || !isSceneCountValid || (!onGenerateStoryboard && !isFeatureConfigured('script_analysis') && !checkChatKeys().isAllConfigured)}
+          disabled={
+            !prompt.trim() ||
+            isSubmitting ||
+            !isSceneCountValid ||
+            (!testMode.enabled && !onGenerateStoryboard && !isFeatureConfigured('script_analysis') && !checkChatKeys().isAllConfigured)
+          }
           className="flex-1"
           size="lg"
         >

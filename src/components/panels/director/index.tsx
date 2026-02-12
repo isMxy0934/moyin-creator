@@ -25,7 +25,7 @@ import { Play, Square, RotateCcw, Settings, Trash2, ChevronLeft, ChevronRight } 
 import { Separator } from "@/components/ui/separator";
 // ResizablePanelGroup not needed here - using global layout
 import { useState, useCallback } from "react";
-import { useAPIConfigStore } from "@/stores/api-config-store";
+import { useAppSettingsStore } from "@/stores/app-settings-store";
 import { useMediaStore } from "@/stores/media-store";
 import { generateStoryboardImage, generateSceneVideos } from "@/lib/storyboard";
 import { getFeatureConfig } from "@/lib/ai/feature-router";
@@ -61,7 +61,6 @@ export function DirectorView() {
     setStoryboardError,
     setStoryboardConfig,
     resetStoryboard,
-    setProjectFolderId,
   } = useDirectorStore();
   
   // Read from project data (with defaults for when project is not yet loaded)
@@ -75,12 +74,11 @@ export function DirectorView() {
     storyPrompt: '',
   };
   const splitScenes = projectData?.splitScenes || [];
-  const projectFolderId = projectData?.projectFolderId || null;
   const screenplay = projectData?.screenplay || null;
   const screenplayStatus = projectData?.screenplayStatus || 'idle';
   const screenplayError = projectData?.screenplayError || null;
 
-  const { getApiKey, isConfigured } = useAPIConfigStore();
+  const testModeEnabled = useAppSettingsStore((state) => state.testMode.enabled);
   const { addMediaFromUrl, getOrCreateCategoryFolder } = useMediaStore();
   const { setActiveTab } = useMediaPanelStore();
   const overallProgress = useOverallProgress();
@@ -89,7 +87,7 @@ export function DirectorView() {
 
   // Check if required APIs are configured (check image generation feature)
   const imageGenConfig = getFeatureConfig('character_generation');
-  const hasRequiredApis = !!imageGenConfig?.apiKey;
+  const hasRequiredApis = testModeEnabled || !!imageGenConfig?.apiKey;
 
   // Step definitions for navigation
   const STEPS = [
@@ -107,6 +105,11 @@ export function DirectorView() {
   };
 
   const currentStepIndex = getCurrentStepIndex();
+  const isLastStep = currentStepIndex === STEPS.length - 1;
+  const completedVideoCount = splitScenes.filter(
+    (scene) => !!scene.videoUrl || scene.videoStatus === 'completed'
+  ).length;
+  const hasExportableVideos = completedVideoCount > 0;
 
   // Navigation handlers
   const goToPrevStep = () => {
@@ -120,6 +123,15 @@ export function DirectorView() {
   };
 
   const goToNextStep = () => {
+    if (isLastStep) {
+      if (!hasExportableVideos) {
+        toast.info('请先至少生成一个分镜视频');
+        return;
+      }
+      setActiveTab('export');
+      toast.success('已跳转到导出');
+      return;
+    }
     if (currentStepIndex >= STEPS.length - 1) return;
     // Can only go forward if conditions are met
     if (currentStepIndex === 0 && !storyboardImage) {
@@ -135,10 +147,12 @@ export function DirectorView() {
   };
 
   const canGoPrev = currentStepIndex > 0 && !['generating', 'splitting'].includes(storyboardStatus);
-  const canGoNext = currentStepIndex < STEPS.length - 1 && 
-    !['generating', 'splitting'].includes(storyboardStatus) &&
-    ((currentStepIndex === 0 && storyboardImage) || 
-     (currentStepIndex === 1 && splitScenes.length > 0));
+  const canGoNext = !['generating', 'splitting'].includes(storyboardStatus) && (
+    (currentStepIndex < STEPS.length - 1 &&
+      ((currentStepIndex === 0 && storyboardImage) ||
+        (currentStepIndex === 1 && splitScenes.length > 0))) ||
+    (isLastStep && hasExportableVideos)
+  );
 
 
   // Handle storyboard generation from ScreenplayInput
@@ -161,17 +175,24 @@ export function DirectorView() {
     setStoryboardProgress(0);
 
     try {
-      // 从服务映射获取图片生成配置
-      const featureConfig = getFeatureConfig('character_generation');
-      if (!featureConfig) {
-        throw new Error('请先在设置中配置图片生成 API');
+      let apiKey = '';
+      let provider: 'apimart' | 'zhipu' | 'nanohajimi' | 'juxinapi' = 'apimart';
+      let model = 'test-mode-model';
+      let baseUrl = 'https://mock.local';
+
+      if (!testModeEnabled) {
+        // 从服务映射获取图片生成配置
+        const featureConfig = getFeatureConfig('character_generation');
+        if (!featureConfig) {
+          throw new Error('请先在设置中配置图片生成 API');
+        }
+        apiKey = featureConfig.apiKey;
+        provider = featureConfig.platform as 'apimart' | 'zhipu' | 'nanohajimi' | 'juxinapi';
+        model = featureConfig.models[0]; // 获取第一个模型
+        baseUrl = featureConfig.baseUrl;
       }
-      const apiKey = featureConfig.apiKey;
-      const provider = featureConfig.platform as 'apimart' | 'zhipu' | 'nanohajimi' | 'juxinapi';
-      const model = featureConfig.models[0]; // 获取第一个模型
-      const baseUrl = featureConfig.baseUrl;
       
-      console.log('[DirectorView] Using image generation config:', { provider, model, baseUrl });
+      console.log('[DirectorView] Using image generation config:', { provider, model, baseUrl, testModeEnabled });
 
       const result = await generateStoryboardImage(
         {
@@ -186,6 +207,7 @@ export function DirectorView() {
           provider,
           model,
           baseUrl,
+          mockMode: testModeEnabled,
         },
         (progress) => setStoryboardProgress(progress)
       );
@@ -212,7 +234,7 @@ export function DirectorView() {
       setStoryboardStatus('error');
       toast.error(`故事板生成失败: ${err.message}`);
     }
-  }, [getApiKey, setStoryboardImage, setStoryboardStatus, setStoryboardError, setStoryboardConfig, getOrCreateCategoryFolder, addMediaFromUrl, activeProjectId]);
+  }, [setStoryboardImage, setStoryboardStatus, setStoryboardError, setStoryboardConfig, getOrCreateCategoryFolder, addMediaFromUrl, activeProjectId, testModeEnabled]);
 
   // Handle video generation from split scenes
   const handleGenerateVideos = useCallback(async () => {
@@ -221,18 +243,25 @@ export function DirectorView() {
       return;
     }
 
-    // 从服务映射获取视频生成配置
-    const videoConfig = getFeatureConfig('video_generation');
-    if (!videoConfig) {
-      toast.error('请先在设置中配置视频生成 API');
-      return;
+    let apiKey = '';
+    let provider: 'apimart' | 'zhipu' | 'nanohajimi' | 'juxinapi' = 'apimart';
+    let model = 'test-mode-model';
+    let baseUrl = 'https://mock.local';
+
+    if (!testModeEnabled) {
+      // 从服务映射获取视频生成配置
+      const videoConfig = getFeatureConfig('video_generation');
+      if (!videoConfig) {
+        toast.error('请先在设置中配置视频生成 API');
+        return;
+      }
+      apiKey = videoConfig.apiKey;
+      provider = videoConfig.platform as 'apimart' | 'zhipu' | 'nanohajimi' | 'juxinapi';
+      model = videoConfig.models[0]; // 获取第一个模型
+      baseUrl = videoConfig.baseUrl;
     }
-    const apiKey = videoConfig.apiKey;
-    const provider = videoConfig.platform as 'apimart' | 'zhipu' | 'nanohajimi' | 'juxinapi';
-    const model = videoConfig.models[0]; // 获取第一个模型
-    const baseUrl = videoConfig.baseUrl;
     
-    console.log('[DirectorView] Using video generation config:', { provider, model, baseUrl });
+    console.log('[DirectorView] Using video generation config:', { provider, model, baseUrl, testModeEnabled });
 
     toast.info(`开始为 ${splitScenes.length} 个场景生成视频... (使用 ${provider} ${model || ''})`);
 
@@ -248,11 +277,12 @@ export function DirectorView() {
         provider, // 直接传递服务映射选择的 provider
         model,
         baseUrl,
+        mockMode: testModeEnabled,
       },
       (sceneId, progress) => {
         console.log(`[DirectorView] Scene ${sceneId} progress: ${progress}%`);
       },
-      (sceneId, videoUrl) => {
+      (sceneId) => {
         toast.success(`场景 ${sceneId} 视频生成完成`);
         // TODO: Add video to media library
       },
@@ -262,7 +292,7 @@ export function DirectorView() {
     );
 
     toast.success('所有视频生成完成！');
-  }, [splitScenes, storyboardConfig]);
+  }, [splitScenes, storyboardConfig, testModeEnabled]);
 
   // Render based on current status (prioritize storyboard workflow)
   const renderContent = () => {
@@ -666,7 +696,7 @@ export function DirectorView() {
             disabled={!canGoNext}
             className="flex-1"
           >
-            下一步
+            {isLastStep ? (hasExportableVideos ? '去导出' : '先生成视频再导出') : '下一步'}
             <ChevronRight className="h-4 w-4 ml-1" />
           </Button>
         </div>

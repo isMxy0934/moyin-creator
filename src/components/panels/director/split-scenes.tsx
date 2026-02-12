@@ -1087,7 +1087,7 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
 
     // Filter scenes that need generation (idle or failed)
     const scenesToGenerate = splitScenes.filter(
-      s => s.videoStatus === 'idle' || s.videoStatus === 'failed'
+      s => !!s.imageDataUrl && (s.videoStatus === 'idle' || s.videoStatus === 'failed')
     );
 
     if (scenesToGenerate.length === 0) {
@@ -3470,6 +3470,8 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
       {(() => {
         const scenesWithImages = splitScenes.filter(s => s.imageDataUrl).length;
         const scenesNeedVideo = splitScenes.filter(s => s.imageDataUrl && (s.videoStatus === 'idle' || s.videoStatus === 'failed')).length;
+        const scenesWithVideo = splitScenes.filter(s => !!s.videoUrl || s.videoStatus === 'completed').length;
+        const allVideosCompleted = splitScenes.length > 0 && scenesWithVideo === splitScenes.length;
         const noImages = scenesWithImages === 0;
         return (
           <div className="flex gap-2 pt-2">
@@ -3478,7 +3480,7 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
                 <TooltipTrigger asChild>
                   <Button
                     onClick={handleGenerateVideos}
-                    disabled={isGenerating || splitScenes.length === 0 || noImages}
+                    disabled={isGenerating || splitScenes.length === 0 || noImages || scenesNeedVideo === 0}
                     className="flex-1"
                     size="lg"
                   >
@@ -3490,7 +3492,9 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
                     ) : (
                       <>
                         <Play className="h-4 w-4 mr-2" />
-                        生成视频 ({scenesNeedVideo}/{splitScenes.length})
+                        {allVideosCompleted
+                          ? `视频已全部生成 (${scenesWithVideo}/${splitScenes.length})`
+                          : `生成视频 (${scenesNeedVideo}/${splitScenes.length})`}
                       </>
                     )}
                   </Button>
@@ -3498,6 +3502,8 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
                 <TooltipContent>
                   {noImages ? (
                     <p>请先为分镜生成图片，再生成视频</p>
+                  ) : allVideosCompleted ? (
+                    <p>全部视频已生成，可在单个分镜上点击“重新生成”</p>
                   ) : (
                     <p>{scenesWithImages} 个分镜已有图片，{scenesNeedVideo} 个待生成视频</p>
                   )}

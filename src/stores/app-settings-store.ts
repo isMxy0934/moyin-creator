@@ -20,16 +20,23 @@ export interface CacheSettings {
   autoCleanDays: number;
 }
 
+export interface TestModeSettings {
+  enabled: boolean;
+  latencyMs: number;
+}
+
 interface AppSettingsState {
   resourceSharing: ResourceSharingSettings;
   storagePaths: StoragePathSettings;
   cacheSettings: CacheSettings;
+  testMode: TestModeSettings;
 }
 
 interface AppSettingsActions {
   setResourceSharing: (settings: Partial<ResourceSharingSettings>) => void;
   setStoragePaths: (paths: Partial<StoragePathSettings>) => void;
   setCacheSettings: (settings: Partial<CacheSettings>) => void;
+  setTestMode: (settings: Partial<TestModeSettings>) => void;
 }
 
 const defaultState: AppSettingsState = {
@@ -44,6 +51,10 @@ const defaultState: AppSettingsState = {
   cacheSettings: {
     autoCleanEnabled: false,
     autoCleanDays: 30,
+  },
+  testMode: {
+    enabled: false,
+    latencyMs: 400,
   },
 };
 
@@ -62,6 +73,10 @@ export const useAppSettingsStore = create<AppSettingsState & AppSettingsActions>
       setCacheSettings: (settings) =>
         set((state) => ({
           cacheSettings: { ...state.cacheSettings, ...settings },
+        })),
+      setTestMode: (settings) =>
+        set((state) => ({
+          testMode: { ...state.testMode, ...settings },
         })),
     }),
     {

@@ -163,6 +163,17 @@ async function handleGenerateScreenplay(command: GenerateScreenplayCommand): Pro
     const sceneCount = config.sceneCount || 5;
     
     console.log('[AI Worker] Using sceneCount:', sceneCount);
+
+    // Pure local mock mode: no network request
+    if (mockMode) {
+      await sleep(300);
+      const screenplay = createWorkerMockScreenplay(prompt, sceneCount, config.aspectRatio || '9:16');
+      postEvent({
+        type: 'SCREENPLAY_READY',
+        payload: screenplay,
+      });
+      return;
+    }
     
     // Only require API key if not in mock mode
     if (!apiKey && !mockMode) {
@@ -854,7 +865,7 @@ async function generateSceneImageOnly(
       reportSceneProgress(screenplayId, scene.sceneId, 'generating', 'image', p / 2);
     }
     
-    const mockImageUrl = `https://picsum.photos/seed/${scene.sceneId}/1280/720`;
+    const mockImageUrl = createWorkerMockImageDataUrl(scene.sceneId, config.aspectRatio || '9:16');
     
     // Report image completed
     postEvent({
@@ -1193,6 +1204,71 @@ function postEvent(event: WorkerEvent): void {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function createWorkerMockImageDataUrl(sceneId: number, aspectRatio: '16:9' | '9:16'): string {
+  const isPortrait = aspectRatio === '9:16';
+  const width = isPortrait ? 720 : 1280;
+  const height = isPortrait ? 1280 : 720;
+  const hue = (sceneId * 53) % 360;
+  const hue2 = (hue + 46) % 360;
+  const label = `Scene ${sceneId} Mock`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="hsl(${hue},72%,38%)"/><stop offset="100%" stop-color="hsl(${hue2},72%,30%)"/></linearGradient></defs>
+<rect width="100%" height="100%" fill="url(#g)"/>
+<rect x="${Math.floor(width * 0.06)}" y="${Math.floor(height * 0.14)}" width="${Math.floor(width * 0.88)}" height="${Math.floor(height * 0.72)}" rx="18" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.22)"/>
+<text x="50%" y="45%" text-anchor="middle" fill="#fff" font-family="system-ui, sans-serif" font-size="${Math.max(24, Math.floor(width * 0.035))}" font-weight="700">TEST MODE</text>
+<text x="50%" y="57%" text-anchor="middle" fill="rgba(255,255,255,0.92)" font-family="system-ui, sans-serif" font-size="${Math.max(16, Math.floor(width * 0.02))}">${label}</text>
+</svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+function createWorkerMockScreenplay(
+  prompt: string,
+  sceneCount: number,
+  aspectRatio: '16:9' | '9:16'
+): AIScreenplay {
+  const now = Date.now();
+  const count = Math.max(1, Math.min(sceneCount || 5, 20));
+  const cameraOptions: AIScene['camera'][] = [
+    'Wide Shot',
+    'Medium Shot',
+    'Close-up',
+    'Tracking',
+    'POV',
+  ];
+
+  return {
+    id: `worker_mock_${now}`,
+    title: '测试模式剧本',
+    genre: '测试',
+    estimatedDurationSeconds: count * 5,
+    emotionalArc: ['setup', 'verify', 'complete'],
+    aspectRatio,
+    orientation: aspectRatio === '9:16' ? 'portrait' : 'landscape',
+    characters: [
+      {
+        id: 'char_mock_1',
+        name: '测试角色',
+        type: 'human',
+        visualTraits: 'clean line art style, stable outfit',
+        personality: '用于流程验证',
+      },
+    ],
+    scenes: Array.from({ length: count }, (_, idx) => ({
+      sceneId: idx + 1,
+      narration: `（测试）第 ${idx + 1} 场：验证完整生成流程`,
+      visualContent: `Test mode scene ${idx + 1}, inspired by: ${prompt.slice(0, 80)}.`,
+      action: `Character performs a simple motion in scene ${idx + 1}.`,
+      camera: cameraOptions[idx % cameraOptions.length],
+      characterDescription: `Test character in scene ${idx + 1}`,
+      status: 'pending',
+      mood: 'test',
+      emotionalHook: 'pipeline verification',
+    })),
+    createdAt: now,
+    updatedAt: now,
+  };
 }
 
 // ==================== Initialization ====================

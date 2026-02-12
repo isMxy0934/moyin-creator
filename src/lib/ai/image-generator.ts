@@ -11,6 +11,11 @@ import { getFeatureConfig, getFeatureNotConfiguredMessage } from '@/lib/ai/featu
 import { retryOperation } from '@/lib/utils/retry';
 import { resolveImageApiFormat } from '@/lib/api-key-manager';
 import { useAPIConfigStore } from '@/stores/api-config-store';
+import {
+  createMockImageDataUrl,
+  isTestModeEnabled,
+  waitForTestModeLatency,
+} from '@/lib/ai/test-mode';
 
 export interface ImageGenerationParams {
   prompt: string;
@@ -211,6 +216,15 @@ async function generateImage(
   params: ImageGenerationParams,
   feature: 'character_generation'
 ): Promise<ImageGenerationResult> {
+  if (isTestModeEnabled()) {
+    await waitForTestModeLatency();
+    return {
+      imageUrl: createMockImageDataUrl(`scene-${Date.now()}`, {
+        label: 'Scene Image (Test Mode)',
+      }),
+    };
+  }
+
   const featureConfig = getFeatureConfig(feature);
   if (!featureConfig) {
     throw new Error(getFeatureNotConfiguredMessage(feature));
@@ -636,6 +650,16 @@ export async function submitGridImageRequest(params: {
   referenceImages?: string[];
 }): Promise<{ imageUrl?: string; taskId?: string }> {
   const { model, prompt, apiKey, baseUrl, aspectRatio, resolution, referenceImages } = params;
+
+  if (isTestModeEnabled()) {
+    await waitForTestModeLatency();
+    return {
+      imageUrl: createMockImageDataUrl(`grid-${model}-${Date.now()}`, {
+        label: 'Grid Image (Test Mode)',
+      }),
+    };
+  }
+
   const normalizedBase = baseUrl.replace(/\/+$/, '');
 
   // 检测 API 格式（与 generateImage 一致）

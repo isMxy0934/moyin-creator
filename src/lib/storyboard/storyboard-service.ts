@@ -13,6 +13,7 @@ import { calculateGrid, type AspectRatio, type Resolution, RESOLUTION_PRESETS } 
 import { retryOperation } from "@/lib/utils/retry";
 import { delay, RATE_LIMITS } from "@/lib/utils/rate-limiter";
 import { submitGridImageRequest } from '@/lib/ai/image-generator';
+import { createMockImageDataUrl, createMockVideoUrl, waitForTestModeLatency } from '@/lib/ai/test-mode';
 
 export interface StoryboardGenerationConfig {
   storyPrompt: string;
@@ -334,8 +335,16 @@ export async function generateStoryboardImage(
 
   // Mock mode - return a placeholder
   if (mockMode) {
+    await waitForTestModeLatency();
     onProgress?.(100);
-    const placeholderUrl = `https://placehold.co/${outputSize.width}x${outputSize.height}/333/fff?text=Storyboard+Mock+(${gridConfig.cols}x${gridConfig.rows})`;
+    const placeholderUrl = createMockImageDataUrl(
+      `storyboard-${sceneCount}-${aspectRatio}`,
+      {
+        width: outputSize.width,
+        height: outputSize.height,
+        label: `Storyboard ${gridConfig.cols}x${gridConfig.rows}`,
+      }
+    );
     return {
       imageUrl: placeholderUrl,
       gridConfig: {
@@ -610,8 +619,8 @@ export async function generateSceneVideos(
 
       // Mock mode
       if (mockMode) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        const mockVideoUrl = `https://example.com/mock-video-${scene.id}.mp4`;
+        await waitForTestModeLatency();
+        const mockVideoUrl = createMockVideoUrl(`scene-${scene.id}`);
         results.set(scene.id, mockVideoUrl);
         onSceneProgress?.(scene.id, 100);
         onSceneComplete?.(scene.id, mockVideoUrl);

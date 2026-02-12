@@ -8,11 +8,8 @@
  * Shows overall generation progress and controls
  */
 
-import { useDirectorStore, useIsGenerating, useOverallProgress, useActiveDirectorProject } from "@/stores/director-store";
-import { Button } from "@/components/ui/button";
+import { useDirectorStore, useIsGenerating, useActiveDirectorProject } from "@/stores/director-store";
 import { 
-  Play, 
-  StopCircle,
   CheckCircle2,
   AlertCircle,
   Clock,
@@ -22,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { useMemo, useCallback, useEffect, useRef } from "react";
 import { getWorkerBridge } from "@/lib/ai/worker-bridge";
 import { useAPIConfigStore } from "@/stores/api-config-store";
+import { useAppSettingsStore } from "@/stores/app-settings-store";
 
 export function GenerationProgress() {
   // Get current project data
@@ -32,7 +30,6 @@ export function GenerationProgress() {
   const { 
     sceneProgress,
     config,
-    cancelAll,
     onSceneProgressUpdate,
     onSceneImageCompleted,
     onSceneCompleted,
@@ -42,10 +39,10 @@ export function GenerationProgress() {
   } = useDirectorStore();
 
   const isGenerating = useIsGenerating();
-  const overallPercent = useOverallProgress();
 
   // Get API keys from config store
   const apiKeys = useAPIConfigStore((state) => state.apiKeys);
+  const testModeEnabled = useAppSettingsStore((state) => state.testMode.enabled);
 
   // Calculate overall progress
   const overallProgress = useMemo(() => {
@@ -95,7 +92,6 @@ export function GenerationProgress() {
 
   // Determine if we're generating images or videos
   const isImageMode = screenplayStatus === 'generating_images';
-  const isVideoMode = screenplayStatus === 'generating_videos';
 
   // Start generation handler (images or videos based on mode)
   const handleStartGeneration = useCallback(async () => {
@@ -141,6 +137,8 @@ export function GenerationProgress() {
         ...config,
         apiKeys: apiKeysCopy,
         imageOnly: isImageMode,  // Flag to only generate images
+        mockImage: testModeEnabled,
+        mockVideo: testModeEnabled,
       };
       
       // Execute based on mode
@@ -159,7 +157,7 @@ export function GenerationProgress() {
     } catch (error) {
       console.error('[GenerationProgress] Failed to start generation:', error);
     }
-  }, [screenplay, config, apiKeys, isImageMode, onSceneProgressUpdate, onSceneImageCompleted, onSceneCompleted, onSceneFailed, onAllImagesCompleted, onAllCompleted]);
+  }, [screenplay, config, apiKeys, isImageMode, onSceneProgressUpdate, onSceneImageCompleted, onSceneCompleted, onSceneFailed, onAllImagesCompleted, onAllCompleted, testModeEnabled]);
 
   // Track if we've already started generation for this screenplay
   const hasStartedRef = useRef<string | null>(null);
@@ -186,7 +184,6 @@ export function GenerationProgress() {
 
   if (!screenplay) return null;
 
-  const hasNotStarted = overallProgress.percent === 0 && !isGenerating;
   const isComplete = overallProgress.completed === overallProgress.total;
 
   return (

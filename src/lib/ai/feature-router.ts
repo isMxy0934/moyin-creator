@@ -18,6 +18,7 @@
 
 import { useAPIConfigStore, type AIFeature, type IProvider, AI_FEATURES } from '@/stores/api-config-store';
 import { parseApiKeys, getProviderKeyManager, ApiKeyManager } from '@/lib/api-key-manager';
+import { isTestModeEnabled } from '@/lib/ai/test-mode';
 
 export interface FeatureConfig {
   feature: AIFeature;
@@ -75,6 +76,32 @@ export function getAllFeatureConfigs(feature: AIFeature): FeatureConfig[] {
  * v2: 支持多模型轮询
  */
 export function getFeatureConfig(feature: AIFeature): FeatureConfig | null {
+  if (isTestModeEnabled()) {
+    const featureInfo = AI_FEATURES.find(f => f.key === feature);
+    const provider: IProvider = {
+      id: 'test-mode-provider',
+      platform: 'mock',
+      name: 'Test Mode Provider',
+      baseUrl: 'https://mock.local',
+      apiKey: 'test-mode-key',
+      model: ['test-mode-model'],
+      capabilities: ['text', 'image_generation', 'video_generation', 'vision'],
+    };
+    const keyManager = new ApiKeyManager(provider.apiKey);
+    return {
+      feature,
+      featureName: featureInfo?.name || feature,
+      provider,
+      apiKey: provider.apiKey,
+      allApiKeys: [provider.apiKey],
+      keyManager,
+      platform: provider.platform,
+      baseUrl: provider.baseUrl,
+      models: provider.model,
+      model: provider.model[0],
+    };
+  }
+
   const configs = getAllFeatureConfigs(feature);
   
   if (configs.length === 0) {

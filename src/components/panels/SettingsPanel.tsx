@@ -110,9 +110,11 @@ export function SettingsPanel() {
     resourceSharing,
     storagePaths,
     cacheSettings,
+    testMode,
     setResourceSharing,
     setStoragePaths,
     setCacheSettings,
+    setTestMode,
   } = useAppSettingsStore();
   const { activeProjectId } = useProjectStore();
   const { assignProjectToUnscoped: assignCharactersToProject } = useCharacterLibraryStore();
@@ -832,6 +834,38 @@ export function SettingsPanel() {
                 <span className="text-xs text-muted-foreground">
                   同时生成的任务数量（多 Key 时可设置更高，建议不超过 Key 数量）
                 </span>
+              </div>
+            </div>
+
+            {/* Test Mode */}
+            <div className="space-y-3 pt-2 border-t border-border">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <Label className="text-xs text-muted-foreground">测试模式（无真实请求）</Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    开启后将使用本地模拟数据跑完整流程，不会调用真实 AI 接口。
+                  </p>
+                </div>
+                <Switch
+                  checked={testMode.enabled}
+                  onCheckedChange={(checked) => setTestMode({ enabled: checked })}
+                />
+              </div>
+              <div className="flex items-center gap-3">
+                <Label className="text-xs text-muted-foreground w-24">模拟延迟(ms)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={3000}
+                  value={testMode.latencyMs}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    if (!Number.isNaN(value) && value >= 0) {
+                      setTestMode({ latencyMs: Math.min(value, 3000) });
+                    }
+                  }}
+                  className="w-24"
+                />
               </div>
             </div>
           </div>
