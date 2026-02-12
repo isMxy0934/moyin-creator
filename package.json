@@ -16,6 +16,7 @@
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
+    "dev:clean": "electron-vite dev -- --clean",
     "build": "electron-vite build && electron-builder --win",
     "prebuild": "powershell -Command \"Stop-Process -Name 'mumu-creator' -ErrorAction SilentlyContinue; Stop-Process -Name 'MUMU' -ErrorAction SilentlyContinue; Stop-Process -Name 'mumu-creator-*-setup' -ErrorAction SilentlyContinue; if (Test-Path release) { Remove-Item -Recurse -Force release -ErrorAction SilentlyContinue }\"",
     "build:win": "electron-vite build && electron-builder --win",

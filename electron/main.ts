@@ -204,6 +204,10 @@ const storageConfigPath = path.join(app.getPath('userData'), 'storage-config.jso
 let storageConfig: StorageConfig = loadStorageConfig()
 let autoCleanInterval: NodeJS.Timeout | null = null
 
+function shouldCleanOnStartup(): boolean {
+  return !app.isPackaged && process.argv.includes('--clean')
+}
+
 function loadStorageConfig(): StorageConfig {
   try {
     if (fs.existsSync(storageConfigPath)) {
@@ -385,6 +389,39 @@ async function clearCache(olderThanDays?: number): Promise<number> {
     ensureDir(dir)
   }
   return cleared
+}
+
+async function clearAllDataForDevStartup() {
+  const userData = app.getPath('userData')
+  const basePath = getStorageBasePath()
+  const dirsToRemove = new Set<string>([
+    path.join(basePath, 'projects'),
+    path.join(basePath, 'media'),
+    ...getCacheDirs(),
+  ])
+
+  const legacyProject = storageConfig.projectPath?.trim()
+  if (legacyProject) dirsToRemove.add(normalizePath(legacyProject))
+  const legacyMedia = storageConfig.mediaPath?.trim()
+  if (legacyMedia) dirsToRemove.add(normalizePath(legacyMedia))
+
+  for (const dir of dirsToRemove) {
+    await removeDir(dir).catch(() => {})
+  }
+
+  await removeDir(path.join(userData, 'IndexedDB')).catch(() => {})
+  await removeDir(path.join(userData, 'Local Storage')).catch(() => {})
+  await removeDir(path.join(userData, 'Session Storage')).catch(() => {})
+  await removeDir(path.join(userData, 'blob_storage')).catch(() => {})
+
+  storageConfig = { ...DEFAULT_STORAGE_CONFIG }
+  try {
+    if (fs.existsSync(storageConfigPath)) fs.unlinkSync(storageConfigPath)
+  } catch (error) {
+    console.warn('Failed to remove storage config:', error)
+  }
+
+  console.log('[DevClean] Cleared app data, caches, and storage config.')
 }
 
 // Get user data path for storing images
@@ -1243,7 +1280,11 @@ protocol.registerSchemesAsPrivileged([{
   }
 }])
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  if (shouldCleanOnStartup()) {
+    await clearAllDataForDevStartup()
+  }
+
   // Seed demo project on first run (before window creation)
   seedDemoProject()
 
