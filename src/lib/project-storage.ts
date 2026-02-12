@@ -34,7 +34,8 @@ function getResourceSharing(): { shareCharacters: boolean; shareScenes: boolean;
   try {
     return useAppSettingsStore.getState().resourceSharing;
   } catch {
-    return { shareCharacters: true, shareScenes: true, shareMedia: true };
+    // Default to isolation when settings are unavailable during early bootstrap.
+    return { shareCharacters: false, shareScenes: false, shareMedia: false };
   }
 }
 
@@ -151,8 +152,8 @@ export function createProjectScopedStorage(storeName: string): StateStorage {
  * splitFn: takes the persisted state object and splits it into project-specific and shared parts
  * mergeFn: merges project-specific and shared data back into a single state object
  */
-export type SplitFn<T = any> = (state: T, projectId: string) => { projectData: T; sharedData: T };
-export type MergeFn<T = any> = (projectData: T | null, sharedData: T | null) => T;
+export type SplitFn<T = unknown> = (state: T, projectId: string) => { projectData: T; sharedData: T };
+export type MergeFn<T = unknown> = (projectData: T | null, sharedData: T | null) => T;
 
 /**
  * Creates a StateStorage that splits flat-array data between:
@@ -166,7 +167,7 @@ export type MergeFn<T = any> = (projectData: T | null, sharedData: T | null) => 
  * @param mergeFn - Function to merge project and shared parts back together
  * @param sharingKey - Optional key in resourceSharing settings to check (e.g., 'shareCharacters')
  */
-export function createSplitStorage<T = any>(
+export function createSplitStorage<T = unknown>(
   storeName: string,
   splitFn: SplitFn<T>,
   mergeFn: MergeFn<T>,
@@ -187,21 +188,12 @@ export function createSplitStorage<T = any>(
       const pid = getActiveProjectId();
       
       if (!pid) {
-        console.warn(`[SplitStorage] No activeProjectId, falling back to legacy key: ${name}`);
-        return fileStorage.getItem(name);
+        console.warn(`[SplitStorage] No activeProjectId, skip loading ${storeName} (${name})`);
+        return null;
       }
 
       const projectKey = `_p/${pid}/${storeName}`;
       const sharedKey = `_shared/${storeName}`;
-      
-      // Try to read current project's data
-      const projectRaw = await fileStorage.getItem(projectKey);
-      
-      // If project file doesn't exist, try legacy file (pre-migration)
-      if (!projectRaw) {
-        console.log(`[SplitStorage] Project file not found for ${storeName}, trying legacy key: ${name}`);
-        return fileStorage.getItem(name);
-      }
 
       // Check if cross-project sharing is enabled
       let sharingEnabled = false;
@@ -210,62 +202,127 @@ export function createSplitStorage<T = any>(
         sharingEnabled = sharing[sharingKey];
       }
 
-      try {
-        const projectState = JSON.parse(projectRaw);
-        const projectPayload = projectState?.state ?? projectState;
+      // Try to read current project's data
+      const projectRaw = await fileStorage.getItem(projectKey);
+      const allPids = getAllProjectIds();
+      const otherPayloads: T[] = [];
+      let sharedPayload: T | null = null;
+      let mergedVersion = 0;
 
+      // Load data from other projects and shared storage only when sharing is enabled,
+      // or when checking whether split-storage has already been migrated.
+      const loadSplitSources = async () => {
         if (sharingEnabled) {
-          // Cross-project sharing ON: load ALL projects' data + shared
-          const allPids = getAllProjectIds();
-          const otherPayloads: T[] = [];
-          
           for (const otherPid of allPids) {
-            if (otherPid === pid) continue; // Current project already loaded
+            if (otherPid === pid) continue;
             const otherKey = `_p/${otherPid}/${storeName}`;
             try {
               const otherRaw = await fileStorage.getItem(otherKey);
-              if (otherRaw) {
-                const otherParsed = JSON.parse(otherRaw);
-                otherPayloads.push(otherParsed?.state ?? otherParsed);
+              if (!otherRaw) continue;
+              const otherParsed = JSON.parse(otherRaw);
+              const otherState = otherParsed?.state ?? otherParsed;
+              otherPayloads.push(otherState);
+              if (typeof otherParsed?.version === 'number') {
+                mergedVersion = Math.max(mergedVersion, otherParsed.version);
               }
             } catch {
               // Skip corrupted project files
             }
           }
-
-          // Load shared data (items without projectId)
-          let sharedPayload: T | null = null;
-          try {
-            const sharedRaw = await fileStorage.getItem(sharedKey);
-            if (sharedRaw) {
-              const sharedParsed = JSON.parse(sharedRaw);
-              sharedPayload = sharedParsed?.state ?? sharedParsed;
-            }
-          } catch {}
-
-          // Merge: shared → other projects → current project (last gets priority for currentFolderId etc.)
-          let merged: T = mergeFn(null, sharedPayload);
-          for (const pd of otherPayloads) {
-            merged = mergeFn(pd, merged);
-          }
-          merged = mergeFn(projectPayload, merged);
-
-          console.log(`[SplitStorage] Loaded ${storeName}: ${allPids.length} projects merged (sharing ON)`);
-          return JSON.stringify({
-            state: merged,
-            version: projectState?.version ?? 0,
-          });
         } else {
+          for (const otherPid of allPids) {
+            if (otherPid === pid) continue;
+            const otherKey = `_p/${otherPid}/${storeName}`;
+            const exists = await fileStorage.getItem(otherKey);
+            if (exists) return true;
+          }
+        }
+
+        try {
+          const sharedRaw = await fileStorage.getItem(sharedKey);
+          if (sharedRaw) {
+            const sharedParsed = JSON.parse(sharedRaw);
+            sharedPayload = sharedParsed?.state ?? sharedParsed;
+            if (typeof sharedParsed?.version === 'number') {
+              mergedVersion = Math.max(mergedVersion, sharedParsed.version);
+            }
+            return true;
+          }
+        } catch {
+          // Ignore malformed shared data; caller will fall back safely.
+        }
+
+        return sharingEnabled ? (otherPayloads.length > 0) : false;
+      };
+
+      try {
+        if (projectRaw) {
+          const projectState = JSON.parse(projectRaw);
+          const projectPayload = projectState?.state ?? projectState;
+          if (typeof projectState?.version === 'number') {
+            mergedVersion = Math.max(mergedVersion, projectState.version);
+          }
+
+          if (sharingEnabled) {
+            await loadSplitSources();
+            // Merge: shared → other projects → current project (last gets priority for currentFolderId etc.)
+            let merged: T = mergeFn(null, sharedPayload);
+            for (const pd of otherPayloads) {
+              merged = mergeFn(pd, merged);
+            }
+            merged = mergeFn(projectPayload, merged);
+
+            console.log(`[SplitStorage] Loaded ${storeName}: ${allPids.length} projects merged (sharing ON)`);
+            return JSON.stringify({
+              state: merged,
+              version: mergedVersion,
+            });
+          }
+
           // Cross-project sharing OFF: only current project's data
           console.log(`[SplitStorage] Loaded ${storeName}: project-only for ${pid.substring(0, 8)} (sharing OFF)`);
           return JSON.stringify({
             state: projectPayload,
-            version: projectState?.version ?? 0,
+            version: mergedVersion,
           });
         }
+
+        // No current project file:
+        // - If split storage already exists, treat as empty project data.
+        // - If split storage does not exist, also start from empty state (no legacy fallback).
+        const hasSplitData = await loadSplitSources();
+        if (hasSplitData) {
+          if (sharingEnabled) {
+            let merged: T = mergeFn(null, sharedPayload);
+            for (const pd of otherPayloads) {
+              merged = mergeFn(pd, merged);
+            }
+            console.log(`[SplitStorage] Loaded ${storeName}: no project file for ${pid.substring(0, 8)}, merged shared/cross-project data`);
+            return JSON.stringify({
+              state: merged,
+              version: mergedVersion,
+            });
+          }
+
+          console.log(`[SplitStorage] Loaded ${storeName}: no project file for ${pid.substring(0, 8)}, returning empty project data`);
+          return JSON.stringify({
+            state: mergeFn(null, null),
+            version: mergedVersion,
+          });
+        }
+
+        console.log(`[SplitStorage] Split files not found for ${storeName}, returning empty state`);
+        return JSON.stringify({
+          state: mergeFn(null, null),
+          version: 0,
+        });
       } catch (error) {
         console.error(`[SplitStorage] Failed to parse/merge ${storeName}:`, error);
-        return projectRaw;
+        if (projectRaw) return projectRaw;
+        return JSON.stringify({
+          state: mergeFn(null, null),
+          version: 0,
+        });
       }
     },
 
