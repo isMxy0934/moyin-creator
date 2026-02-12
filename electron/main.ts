@@ -1168,10 +1168,35 @@ function copyDirSync(src: string, dest: string) {
  */
 function seedDemoProject() {
   const projectDataRoot = getProjectDataRoot()
-  const marker = path.join(projectDataRoot, 'moyin-project-store.json')
+  const marker = path.join(projectDataRoot, 'mumu-project-store.json')
+  const legacyMarker = path.join(projectDataRoot, 'moyin-project-store.json')
+
+  const ensureDemoStoreCompatibility = () => {
+    // Demo package still contains legacy moyin-* filenames.
+    // Keep both files for backward compatibility, but always ensure mumu-* exists.
+    const legacyProjectStore = path.join(projectDataRoot, 'moyin-project-store.json')
+    const currentProjectStore = path.join(projectDataRoot, 'mumu-project-store.json')
+    if (!fs.existsSync(currentProjectStore) && fs.existsSync(legacyProjectStore)) {
+      fs.copyFileSync(legacyProjectStore, currentProjectStore)
+      console.log('[Seed] Migrated demo store file: moyin-project-store.json -> mumu-project-store.json')
+    }
+
+    const legacyCharacterStore = path.join(projectDataRoot, 'moyin-character-library.json')
+    const currentCharacterStore = path.join(projectDataRoot, 'mumu-character-library.json')
+    if (!fs.existsSync(currentCharacterStore) && fs.existsSync(legacyCharacterStore)) {
+      fs.copyFileSync(legacyCharacterStore, currentCharacterStore)
+      console.log('[Seed] Migrated demo store file: moyin-character-library.json -> mumu-character-library.json')
+    }
+  }
 
   if (fs.existsSync(marker)) {
-    // Not first run — project store already exists
+    // Already initialized with current naming.
+    return
+  }
+
+  if (fs.existsSync(legacyMarker)) {
+    // Existing legacy data: create current-compatible filenames and return.
+    ensureDemoStoreCompatibility()
     return
   }
 
@@ -1190,6 +1215,9 @@ function seedDemoProject() {
     // Copy project JSON files
     copyDirSync(demoProjects, projectDataRoot)
     console.log('[Seed] Copied project data to:', projectDataRoot)
+
+    // Ensure copied demo files match current store keys.
+    ensureDemoStoreCompatibility()
 
     // Copy media files
     if (fs.existsSync(demoMedia)) {
