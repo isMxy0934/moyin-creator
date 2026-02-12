@@ -114,14 +114,7 @@ export function DirectorView() {
   // Navigation handlers
   const goToPrevStep = () => {
     if (currentStepIndex === 0) return;
-    // Script-import path may have split scenes without storyboardImage.
-    // In this case, there is no meaningful preview step; jump back to input directly.
-    if (currentStepIndex === 2 && !storyboardImage && splitScenes.length > 0) {
-      setStoryboardStatus('idle');
-      return;
-    }
     const prevStep = STEPS[currentStepIndex - 1];
-    // Keep generated data when navigating backward; only switch workflow step.
     setStoryboardStatus(prevStep.storyboardStatus);
   };
 
@@ -136,17 +129,10 @@ export function DirectorView() {
       return;
     }
     if (currentStepIndex >= STEPS.length - 1) return;
-    // Can only go forward if conditions are met
-    if (currentStepIndex === 0) {
-      // Script-import path: no storyboard image, but split scenes already exist.
-      if (!storyboardImage && splitScenes.length > 0) {
-        setStoryboardStatus('editing');
-        return;
-      }
-      if (!storyboardImage) {
-        toast.error('请先生成故事板');
-        return;
-      }
+    // Step 0：必须先生成故事板（第一帧图片），不管是导入还是手动输入
+    if (currentStepIndex === 0 && !storyboardImage) {
+      toast.error('请先生成故事板');
+      return;
     }
     if (currentStepIndex === 1 && splitScenes.length === 0) {
       toast.error('请先切割场景');
@@ -157,10 +143,10 @@ export function DirectorView() {
   };
 
   const canGoPrev = currentStepIndex > 0 && !['generating', 'splitting'].includes(storyboardStatus);
+  // 统一规则：Step 0 必须有故事板图片才能前进，不分导入/非导入
   const canGoNext = !['generating', 'splitting'].includes(storyboardStatus) && (
-    (currentStepIndex < STEPS.length - 1 &&
-      ((currentStepIndex === 0 && (storyboardImage || splitScenes.length > 0)) ||
-        (currentStepIndex === 1 && splitScenes.length > 0))) ||
+    (currentStepIndex === 0 && !!storyboardImage) ||
+    (currentStepIndex === 1 && splitScenes.length > 0) ||
     (isLastStep && hasExportableVideos)
   );
 
