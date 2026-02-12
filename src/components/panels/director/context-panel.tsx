@@ -51,7 +51,7 @@ function StatusIcon({ status }: { status?: CompletionStatus }) {
 
 // 导出组件
 export function DirectorContextPanel() {
-  const { setActiveTab, goToDirectorWithData } = useMediaPanelStore();
+  const { setActiveTab } = useMediaPanelStore();
   const scriptProject = useActiveScriptProject();
   const { addScenesFromScript } = useDirectorStore();
   const { resourceSharing } = useAppSettingsStore();
@@ -77,7 +77,6 @@ export function DirectorContextPanel() {
 
   const scriptData = scriptProject?.scriptData || null;
   const shots = scriptProject?.shots || [];
-  const styleId = scriptProject?.styleId || "ghibli";
 
   // 如果没有episodes，创建一个默认的
   const episodes = useMemo(() => {
@@ -379,6 +378,11 @@ export function DirectorContextPanel() {
     
     // 自动匹配场景库中的场景和视角（优先使用已有的视角关联）
     const sceneMatch = findMatchingSceneAndViewpointQuick(shot, scene, shotIndexInScene >= 0 ? shotIndexInScene : undefined);
+
+    if (splitScenes.some((s) => s.sourceShotId === shot.id)) {
+      toast.info('该分镜已在编辑列表中');
+      return;
+    }
     
     addScenesFromScript([{
       // 场景信息
@@ -409,6 +413,9 @@ export function DirectorContextPanel() {
       soundEffectText: shot.soundEffect || '',
       // 对白
       dialogue: shot.dialogue || '',
+      sourceShotId: shot.id,
+      sourceSceneId: scene.id,
+      sourceEpisodeId: shot.episodeId,
       // 动作描述
       actionSummary: shot.actionSummary || '',
       // 镜头运动
@@ -458,7 +465,6 @@ export function DirectorContextPanel() {
       return;
     }
     
-    let matchedCount = 0;
     const scenesToAdd = sceneShots.map((shot, shotIndexInScene) => {
       // 使用详细的视觉描述作为提示词（优先）
       let promptZh = shot.visualDescription || '';
@@ -474,7 +480,6 @@ export function DirectorContextPanel() {
       
       // 自动匹配场景库中的场景和视角（优先使用已有的视角关联，保底用序号）
       const sceneMatch = findMatchingSceneAndViewpointQuick(shot, scene, shotIndexInScene);
-      if (sceneMatch) matchedCount++;
       
       return {
         // 场景信息
@@ -505,6 +510,9 @@ export function DirectorContextPanel() {
         soundEffectText: shot.soundEffect || '',
         // 对白
         dialogue: shot.dialogue || '',
+        sourceShotId: shot.id,
+        sourceSceneId: scene.id,
+        sourceEpisodeId: shot.episodeId,
         // 动作描述
         actionSummary: shot.actionSummary || '',
         // 镜头运动
@@ -542,91 +550,47 @@ export function DirectorContextPanel() {
       };
     });
     
-    addScenesFromScript(scenesToAdd);
-    const matchInfo = matchedCount > 0 ? ` (${matchedCount}个已匹配场景库)` : '';
-    toast.success(`已添加 ${scenesToAdd.length} 个分镜到编辑列表${matchInfo}`);
+    const existingSourceShotIds = new Set(
+      splitScenes
+        .map((s) => s.sourceShotId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    );
+    const incomingSourceShotIds = new Set<string>();
+    const dedupedScenes = scenesToAdd.filter((item) => {
+      const sourceShotId = item.sourceShotId?.trim();
+      if (!sourceShotId) return true;
+      if (existingSourceShotIds.has(sourceShotId) || incomingSourceShotIds.has(sourceShotId)) {
+        return false;
+      }
+      incomingSourceShotIds.add(sourceShotId);
+      return true;
+    });
+
+    const skippedCount = scenesToAdd.length - dedupedScenes.length;
+    if (dedupedScenes.length === 0) {
+      toast.info('该场景分镜已在编辑列表中');
+      return;
+    }
+
+    addScenesFromScript(dedupedScenes);
+    const matchedAddedCount = dedupedScenes.filter((item) => !!item.sceneLibraryId).length;
+    const matchInfo = matchedAddedCount > 0 ? ` (${matchedAddedCount}个已匹配场景库)` : '';
+    const skipInfo = skippedCount > 0 ? `（跳过 ${skippedCount} 个重复）` : '';
+    toast.success(`已添加 ${dedupedScenes.length} 个分镜到编辑列表${matchInfo}${skipInfo}`);
   };
 
   // 发送单个分镜到AI导演输入（模式一）
   const handleSendShot = (shot: Shot, scene: ScriptScene) => {
-    // 构建故事提示
-    const parts: string[] = [];
-    if (scene.location) parts.push(`场景：${scene.location}`);
-    if (scene.time) parts.push(`时间：${scene.time}`);
-    if (shot.actionSummary) parts.push(`动作：${shot.actionSummary}`);
-    if (shot.dialogue) parts.push(`对白：${shot.dialogue}`);
-
-    const storyPrompt = parts.join("\n");
-
-    // 提取角色名
-    const characterNames: string[] = [];
-    if (shot.characterIds && scriptData) {
-      shot.characterIds.forEach((charId) => {
-        const char = scriptData.characters.find((c) => c.id === charId);
-        if (char) characterNames.push(char.name);
-      });
-    }
-
-    goToDirectorWithData({
-      storyPrompt,
-      characterNames,
-      sceneLocation: scene.location,
-      sceneTime: scene.time,
-      shotId: shot.id,
-      sceneCount: 1,
-      styleId,
-      sourceType: "shot",
-    });
-
+    // 发送操作改为完整结构化携带，避免只传文本导致镜头参数丢失
+    handleAddShotToSplitScenes(shot, scene);
     setSelectedShotId(shot.id);
     setSelectedSceneId(null);
   };
 
   // 发送整个场景到AI导演输入
   const handleSendScene = (scene: ScriptScene) => {
-    const sceneShots = shotsByScene[scene.id] || [];
-
-    // 构建故事提示 - 合并场景下所有分镜
-    const parts: string[] = [];
-    if (scene.location) parts.push(`场景：${scene.location}`);
-    if (scene.time) parts.push(`时间：${scene.time}`);
-    if (scene.atmosphere) parts.push(`氛围：${scene.atmosphere}`);
-
-    // 添加所有分镜的动作和对白
-    sceneShots.forEach((shot, idx) => {
-      const shotParts: string[] = [];
-      if (shot.actionSummary) shotParts.push(shot.actionSummary);
-      if (shot.dialogue) shotParts.push(`"${shot.dialogue}"`);
-      if (shotParts.length > 0) {
-        parts.push(`[镜头${idx + 1}] ${shotParts.join(" - ")}`);
-      }
-    });
-
-    const storyPrompt = parts.join("\n");
-
-    // 收集场景中所有角色
-    const characterNames: string[] = [];
-    if (scriptData) {
-      const charIds = new Set<string>();
-      sceneShots.forEach((shot) => {
-        shot.characterIds?.forEach((id) => charIds.add(id));
-      });
-      charIds.forEach((charId) => {
-        const char = scriptData.characters.find((c) => c.id === charId);
-        if (char) characterNames.push(char.name);
-      });
-    }
-
-    goToDirectorWithData({
-      storyPrompt,
-      characterNames,
-      sceneLocation: scene.location,
-      sceneTime: scene.time,
-      sceneCount: sceneShots.length || 1,
-      styleId,
-      sourceType: "scene",
-    });
-
+    // 发送操作改为完整结构化携带，避免只传文本导致镜头参数丢失
+    handleAddSceneToSplitScenes(scene);
     setSelectedSceneId(scene.id);
     setSelectedShotId(null);
   };

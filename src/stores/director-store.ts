@@ -157,6 +157,10 @@ export interface SplitScene {
   emotionTags: EmotionTag[];
   
   // ========== 剧本导入信息（参考用）==========
+  // 来源分镜标识（用于去重，避免重复添加同一分镜）
+  sourceShotId?: string;
+  sourceSceneId?: string;
+  sourceEpisodeId?: string;
   // 对白/台词（用于配音和字幕）
   dialogue: string;
   // 动作描述（从剧本导入，用于参考）
@@ -422,6 +426,9 @@ interface DirectorActions {
     dialogue?: string;
     actionSummary?: string;
     cameraMovement?: string;
+    sourceShotId?: string;
+    sourceSceneId?: string;
+    sourceEpisodeId?: string;
     sceneName?: string;
     sceneLocation?: string;
     // 场景库关联（自动匹配）
@@ -543,33 +550,145 @@ const INTERRUPTED_TASK_MESSAGE = '检测到上次任务中断，请重新发起�
 const isInterruptedGenerationStatus = (status?: GenerationStatus) =>
   status === 'generating' || status === 'uploading';
 
+const normalizeNonEmptyText = (val?: string | null): string | undefined => {
+  if (typeof val !== 'string') return undefined;
+  const trimmed = val.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+};
+
+const applyPromptFallback = (
+  scene: SplitScene,
+  sceneIndex: number,
+  storyPrompt?: string,
+): SplitScene => {
+  const sceneNo = scene.id > 0 ? scene.id : sceneIndex + 1;
+  const sceneLabel = `场景 ${sceneNo}`;
+
+  const basePrompt = normalizeNonEmptyText(scene.actionSummary)
+    || normalizeNonEmptyText(scene.sceneName)
+    || normalizeNonEmptyText(scene.videoPromptZh)
+    || normalizeNonEmptyText(scene.videoPrompt)
+    || normalizeNonEmptyText(scene.imagePromptZh)
+    || normalizeNonEmptyText(scene.imagePrompt)
+    || (normalizeNonEmptyText(storyPrompt) ? `${normalizeNonEmptyText(storyPrompt)}（${sceneLabel}）` : sceneLabel);
+
+  const endPrompt = `${basePrompt} 的结束状态`;
+  const updates: Partial<SplitScene> = {};
+
+  if (!normalizeNonEmptyText(scene.sceneName)) {
+    updates.sceneName = sceneLabel;
+  }
+  if (!normalizeNonEmptyText(scene.actionSummary)) {
+    updates.actionSummary = basePrompt;
+  }
+
+  const imagePrompt = normalizeNonEmptyText(scene.imagePrompt);
+  const imagePromptZh = normalizeNonEmptyText(scene.imagePromptZh);
+  if (!imagePrompt && !imagePromptZh) {
+    updates.imagePrompt = basePrompt;
+    updates.imagePromptZh = basePrompt;
+  } else {
+    if (!imagePrompt && imagePromptZh) updates.imagePrompt = imagePromptZh;
+    if (!imagePromptZh && imagePrompt) updates.imagePromptZh = imagePrompt;
+  }
+
+  const videoPrompt = normalizeNonEmptyText(scene.videoPrompt);
+  const videoPromptZh = normalizeNonEmptyText(scene.videoPromptZh);
+  if (!videoPrompt && !videoPromptZh) {
+    updates.videoPrompt = basePrompt;
+    updates.videoPromptZh = basePrompt;
+  } else {
+    if (!videoPrompt && videoPromptZh) updates.videoPrompt = videoPromptZh;
+    if (!videoPromptZh && videoPrompt) updates.videoPromptZh = videoPrompt;
+  }
+
+  const endFramePrompt = normalizeNonEmptyText(scene.endFramePrompt);
+  const endFramePromptZh = normalizeNonEmptyText(scene.endFramePromptZh);
+  if (!endFramePrompt && !endFramePromptZh) {
+    updates.endFramePrompt = endPrompt;
+    updates.endFramePromptZh = endPrompt;
+  } else {
+    if (!endFramePrompt && endFramePromptZh) updates.endFramePrompt = endFramePromptZh;
+    if (!endFramePromptZh && endFramePrompt) updates.endFramePromptZh = endFramePrompt;
+  }
+
+  if (Object.keys(updates).length === 0) return scene;
+  return { ...scene, ...updates };
+};
+
 const normalizeSplitSceneAfterRehydrate = (scene: SplitScene): SplitScene => {
   let next = scene;
 
   if (isInterruptedGenerationStatus(scene.imageStatus)) {
+    const hasImageResult = Boolean(scene.imageDataUrl || scene.imageHttpUrl);
     next = {
       ...next,
-      imageStatus: 'failed',
-      imageError: scene.imageError || INTERRUPTED_TASK_MESSAGE,
-      imageProgress: Math.min(scene.imageProgress ?? 0, 99),
+      imageStatus: hasImageResult ? 'completed' : 'failed',
+      imageError: hasImageResult ? null : (scene.imageError || INTERRUPTED_TASK_MESSAGE),
+      imageProgress: hasImageResult ? 100 : Math.min(scene.imageProgress ?? 0, 99),
     };
   }
 
   if (isInterruptedGenerationStatus(scene.videoStatus)) {
+    const hasVideoResult = Boolean(scene.videoUrl || scene.videoMediaId);
     next = {
       ...next,
-      videoStatus: 'failed',
-      videoError: scene.videoError || INTERRUPTED_TASK_MESSAGE,
-      videoProgress: Math.min(scene.videoProgress ?? 0, 99),
+      videoStatus: hasVideoResult ? 'completed' : 'failed',
+      videoError: hasVideoResult ? null : (scene.videoError || INTERRUPTED_TASK_MESSAGE),
+      videoProgress: hasVideoResult ? 100 : Math.min(scene.videoProgress ?? 0, 99),
     };
   }
 
   if (isInterruptedGenerationStatus(scene.endFrameStatus)) {
+    const hasEndFrameResult = Boolean(scene.endFrameImageUrl || scene.endFrameHttpUrl);
     next = {
       ...next,
-      endFrameStatus: 'failed',
-      endFrameError: scene.endFrameError || INTERRUPTED_TASK_MESSAGE,
-      endFrameProgress: Math.min(scene.endFrameProgress ?? 0, 99),
+      endFrameStatus: hasEndFrameResult ? 'completed' : 'failed',
+      endFrameError: hasEndFrameResult ? null : (scene.endFrameError || INTERRUPTED_TASK_MESSAGE),
+      endFrameProgress: hasEndFrameResult ? 100 : Math.min(scene.endFrameProgress ?? 0, 99),
+    };
+  }
+
+  // Cleanup stale false-positive interruption errors from older recovery logic.
+  if (
+    next.imageStatus === 'failed' &&
+    next.imageError === INTERRUPTED_TASK_MESSAGE &&
+    !next.imageDataUrl &&
+    !next.imageHttpUrl
+  ) {
+    next = {
+      ...next,
+      imageStatus: 'idle',
+      imageError: null,
+      imageProgress: 0,
+    };
+  }
+
+  if (
+    next.videoStatus === 'failed' &&
+    next.videoError === INTERRUPTED_TASK_MESSAGE &&
+    !next.videoUrl &&
+    !next.videoMediaId
+  ) {
+    next = {
+      ...next,
+      videoStatus: 'idle',
+      videoError: null,
+      videoProgress: 0,
+    };
+  }
+
+  if (
+    next.endFrameStatus === 'failed' &&
+    next.endFrameError === INTERRUPTED_TASK_MESSAGE &&
+    !next.endFrameImageUrl &&
+    !next.endFrameHttpUrl
+  ) {
+    next = {
+      ...next,
+      endFrameStatus: 'idle',
+      endFrameError: null,
+      endFrameProgress: 0,
     };
   }
 
@@ -578,17 +697,20 @@ const normalizeSplitSceneAfterRehydrate = (scene: SplitScene): SplitScene => {
 
 const normalizeProjectAfterRehydrate = (project: DirectorProjectData, projectId?: string): DirectorProjectData => {
   let changed = false;
+  const storyPrompt = project.storyboardConfig?.storyPrompt;
 
-  const splitScenes = (project.splitScenes || []).map((scene) => {
+  const splitScenes = (project.splitScenes || []).map((scene, index) => {
     const normalized = normalizeSplitSceneAfterRehydrate(scene);
-    if (normalized !== scene) changed = true;
-    return normalized;
+    const hydrated = applyPromptFallback(normalized, index, storyPrompt);
+    if (hydrated !== scene) changed = true;
+    return hydrated;
   });
 
-  const trailerScenes = (project.trailerScenes || []).map((scene) => {
+  const trailerScenes = (project.trailerScenes || []).map((scene, index) => {
     const normalized = normalizeSplitSceneAfterRehydrate(scene);
-    if (normalized !== scene) changed = true;
-    return normalized;
+    const hydrated = applyPromptFallback(normalized, index, storyPrompt);
+    if (hydrated !== scene) changed = true;
+    return hydrated;
   });
 
   let storyboardStatus = project.storyboardStatus;
@@ -599,7 +721,11 @@ const normalizeProjectAfterRehydrate = (project: DirectorProjectData, projectId?
       : project.storyboardImage
         ? 'preview'
         : 'idle';
-    storyboardError = storyboardError || INTERRUPTED_TASK_MESSAGE;
+    if (storyboardStatus === 'idle') {
+      storyboardError = storyboardError || INTERRUPTED_TASK_MESSAGE;
+    } else {
+      storyboardError = null;
+    }
     changed = true;
   }
 
@@ -611,7 +737,9 @@ const normalizeProjectAfterRehydrate = (project: DirectorProjectData, projectId?
     screenplayStatus === 'generating_videos'
   ) {
     screenplayStatus = project.screenplay ? 'ready' : 'idle';
-    screenplayError = screenplayError || INTERRUPTED_TASK_MESSAGE;
+    screenplayError = screenplayStatus === 'idle'
+      ? (screenplayError || INTERRUPTED_TASK_MESSAGE)
+      : null;
     changed = true;
   }
 
@@ -622,6 +750,23 @@ const normalizeProjectAfterRehydrate = (project: DirectorProjectData, projectId?
       status: 'error',
       error: trailerConfig.error || INTERRUPTED_TASK_MESSAGE,
     };
+    changed = true;
+  }
+  if (trailerConfig?.status === 'error' && trailerConfig.error === INTERRUPTED_TASK_MESSAGE) {
+    trailerConfig = {
+      ...trailerConfig,
+      status: 'idle',
+      error: undefined,
+    };
+    changed = true;
+  }
+
+  if (storyboardError === INTERRUPTED_TASK_MESSAGE && storyboardStatus !== 'error') {
+    storyboardError = null;
+    changed = true;
+  }
+  if (screenplayError === INTERRUPTED_TASK_MESSAGE && screenplayStatus !== 'error') {
+    screenplayError = null;
     changed = true;
   }
 
@@ -921,96 +1066,101 @@ export const useDirectorStore = create<DirectorStore>()(
   setSplitScenes: (scenes) => {
     const { activeProjectId, projects } = get();
     if (!activeProjectId) return;
+    const project = projects[activeProjectId];
+    const storyPrompt = project?.storyboardConfig?.storyPrompt;
     
     // Ensure all scenes have all fields initialized with defaults
-    const initialized = scenes.map(s => ({
-      ...s,
-      // 场景基本信息
-      sceneName: (s as any).sceneName ?? '',
-      sceneLocation: (s as any).sceneLocation ?? '',
-      
-      // ========== 首帧相关 ==========
-      imageHttpUrl: (s as any).imageHttpUrl ?? null,
-      // 首帧提示词（新增）
-      imagePrompt: (s as any).imagePrompt ?? s.videoPrompt ?? '',
-      imagePromptZh: (s as any).imagePromptZh ?? s.videoPromptZh ?? s.videoPrompt ?? '',
-      // 首帧生成状态
-      imageStatus: s.imageStatus || 'completed' as const,
-      imageProgress: s.imageProgress ?? 100,
-      imageError: s.imageError ?? null,
-      
-      // ========== 尾帧相关 ==========
-      // 是否需要尾帧（新增，默认 false）
-      needsEndFrame: (s as any).needsEndFrame ?? false,
-      endFrameImageUrl: s.endFrameImageUrl ?? null,
-      endFrameHttpUrl: (s as any).endFrameHttpUrl ?? null,
-      endFrameSource: s.endFrameSource ?? null,
-      // 尾帧提示词（新增）
-      endFramePrompt: (s as any).endFramePrompt ?? '',
-      endFramePromptZh: (s as any).endFramePromptZh ?? '',
-      // 尾帧生成状态（新增）
-      endFrameStatus: (s as any).endFrameStatus || 'idle' as const,
-      endFrameProgress: (s as any).endFrameProgress ?? 0,
-      endFrameError: (s as any).endFrameError ?? null,
-      
-      // ========== 视频相关 ==========
-      videoPromptZh: s.videoPromptZh ?? s.videoPrompt ?? '',
-      videoStatus: s.videoStatus || 'idle' as const,
-      videoProgress: s.videoProgress ?? 0,
-      videoUrl: s.videoUrl ?? null,
-      videoError: s.videoError ?? null,
-      videoMediaId: s.videoMediaId ?? null,
-      
-      // ========== 角色与情绪 ==========
-      characterIds: s.characterIds ?? [],
-      emotionTags: s.emotionTags ?? [],
-      
-      // ========== 剧本导入信息 ==========
-      dialogue: s.dialogue ?? '',
-      actionSummary: s.actionSummary ?? '',
-      cameraMovement: s.cameraMovement ?? '',
-      soundEffectText: (s as any).soundEffectText ?? '',
-      
-      // ========== 视频参数 ==========
-      shotSize: s.shotSize ?? null,
-      duration: s.duration ?? 5,
-      ambientSound: s.ambientSound ?? '',
-      soundEffects: s.soundEffects ?? [],
-      
-      // ========== 灯光师 (Gaffer) — 每个分镜独立 ==========
-      lightingStyle: s.lightingStyle ?? undefined,
-      lightingDirection: s.lightingDirection ?? undefined,
-      colorTemperature: s.colorTemperature ?? undefined,
-      lightingNotes: s.lightingNotes ?? undefined,
-      
-      // ========== 跟焦员 (Focus Puller) — 每个分镜独立 ==========
-      depthOfField: s.depthOfField ?? undefined,
-      focusTarget: s.focusTarget ?? undefined,
-      focusTransition: s.focusTransition ?? undefined,
-      
-      // ========== 器材组 (Camera Rig) — 每个分镜独立 ==========
-      cameraRig: s.cameraRig ?? undefined,
-      movementSpeed: s.movementSpeed ?? undefined,
-      
-      // ========== 特效师 (On-set SFX) — 每个分镜独立 ==========
-      atmosphericEffects: s.atmosphericEffects ?? undefined,
-      effectIntensity: s.effectIntensity ?? undefined,
-      
-      // ========== 速度控制 (Speed Ramping) — 每个分镜独立 ==========
-      playbackSpeed: s.playbackSpeed ?? undefined,
-      
-      // ========== 特殊拍摄手法 — 每个分镜独立 ==========
-      specialTechnique: s.specialTechnique ?? undefined,
-      
-      // ========== 场记/连戏 (Continuity) — 每个分镜独立 ==========
-      continuityRef: s.continuityRef ?? undefined,
-    }));
+    const initialized = scenes.map((s, index) => {
+      const scene = {
+        ...s,
+        // 场景基本信息
+        sceneName: (s as any).sceneName ?? '',
+        sceneLocation: (s as any).sceneLocation ?? '',
+        
+        // ========== 首帧相关 ==========
+        imageHttpUrl: (s as any).imageHttpUrl ?? null,
+        // 首帧提示词（新增）
+        imagePrompt: (s as any).imagePrompt ?? s.videoPrompt ?? '',
+        imagePromptZh: (s as any).imagePromptZh ?? s.videoPromptZh ?? s.videoPrompt ?? '',
+        // 首帧生成状态
+        imageStatus: s.imageStatus || 'completed' as const,
+        imageProgress: s.imageProgress ?? 100,
+        imageError: s.imageError ?? null,
+        
+        // ========== 尾帧相关 ==========
+        // 是否需要尾帧（新增，默认 false）
+        needsEndFrame: (s as any).needsEndFrame ?? false,
+        endFrameImageUrl: s.endFrameImageUrl ?? null,
+        endFrameHttpUrl: (s as any).endFrameHttpUrl ?? null,
+        endFrameSource: s.endFrameSource ?? null,
+        // 尾帧提示词（新增）
+        endFramePrompt: (s as any).endFramePrompt ?? '',
+        endFramePromptZh: (s as any).endFramePromptZh ?? '',
+        // 尾帧生成状态（新增）
+        endFrameStatus: (s as any).endFrameStatus || 'idle' as const,
+        endFrameProgress: (s as any).endFrameProgress ?? 0,
+        endFrameError: (s as any).endFrameError ?? null,
+        
+        // ========== 视频相关 ==========
+        videoPromptZh: s.videoPromptZh ?? s.videoPrompt ?? '',
+        videoStatus: s.videoStatus || 'idle' as const,
+        videoProgress: s.videoProgress ?? 0,
+        videoUrl: s.videoUrl ?? null,
+        videoError: s.videoError ?? null,
+        videoMediaId: s.videoMediaId ?? null,
+        
+        // ========== 角色与情绪 ==========
+        characterIds: s.characterIds ?? [],
+        emotionTags: s.emotionTags ?? [],
+        
+        // ========== 剧本导入信息 ==========
+        dialogue: s.dialogue ?? '',
+        actionSummary: s.actionSummary ?? '',
+        cameraMovement: s.cameraMovement ?? '',
+        soundEffectText: (s as any).soundEffectText ?? '',
+        
+        // ========== 视频参数 ==========
+        shotSize: s.shotSize ?? null,
+        duration: s.duration ?? 5,
+        ambientSound: s.ambientSound ?? '',
+        soundEffects: s.soundEffects ?? [],
+        
+        // ========== 灯光师 (Gaffer) — 每个分镜独立 ==========
+        lightingStyle: s.lightingStyle ?? undefined,
+        lightingDirection: s.lightingDirection ?? undefined,
+        colorTemperature: s.colorTemperature ?? undefined,
+        lightingNotes: s.lightingNotes ?? undefined,
+        
+        // ========== 跟焦员 (Focus Puller) — 每个分镜独立 ==========
+        depthOfField: s.depthOfField ?? undefined,
+        focusTarget: s.focusTarget ?? undefined,
+        focusTransition: s.focusTransition ?? undefined,
+        
+        // ========== 器材组 (Camera Rig) — 每个分镜独立 ==========
+        cameraRig: s.cameraRig ?? undefined,
+        movementSpeed: s.movementSpeed ?? undefined,
+        
+        // ========== 特效师 (On-set SFX) — 每个分镜独立 ==========
+        atmosphericEffects: s.atmosphericEffects ?? undefined,
+        effectIntensity: s.effectIntensity ?? undefined,
+        
+        // ========== 速度控制 (Speed Ramping) — 每个分镜独立 ==========
+        playbackSpeed: s.playbackSpeed ?? undefined,
+        
+        // ========== 特殊拍摄手法 — 每个分镜独立 ==========
+        specialTechnique: s.specialTechnique ?? undefined,
+        
+        // ========== 场记/连戏 (Continuity) — 每个分镜独立 ==========
+        continuityRef: s.continuityRef ?? undefined,
+      };
+      return applyPromptFallback(scene, index, storyPrompt);
+    });
     
     set({
       projects: {
         ...projects,
         [activeProjectId]: {
-          ...projects[activeProjectId],
+          ...project,
           splitScenes: initialized,
         },
       },
@@ -1391,7 +1541,7 @@ export const useDirectorStore = create<DirectorStore>()(
     if (!activeProjectId) return;
     const project = projects[activeProjectId];
     const remaining = project.splitScenes.filter(s => s.id !== sceneId);
-    const renumbered = remaining.map((s, idx) => ({ ...s, id: idx }));
+    const renumbered = remaining.map((s, idx) => ({ ...s, id: idx + 1 }));
     set({
       projects: {
         ...projects,
@@ -1441,89 +1591,123 @@ export const useDirectorStore = create<DirectorStore>()(
     if (!activeProjectId) return;
     const project = projects[activeProjectId];
     const splitScenes = project?.splitScenes || [];
+    const storyPrompt = project?.storyboardConfig?.storyPrompt;
+    const existingSourceShotIds = new Set(
+      splitScenes
+        .map((s) => s.sourceShotId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    );
+    const incomingSourceShotIds = new Set<string>();
+    let skippedDuplicateCount = 0;
+
+    const dedupedScenes = scenes.filter((scene) => {
+      const sourceShotId = scene.sourceShotId?.trim();
+      if (!sourceShotId) return true;
+      if (existingSourceShotIds.has(sourceShotId) || incomingSourceShotIds.has(sourceShotId)) {
+        skippedDuplicateCount += 1;
+        return false;
+      }
+      incomingSourceShotIds.add(sourceShotId);
+      return true;
+    });
+
+    if (dedupedScenes.length === 0) {
+      console.log('[DirectorStore] Skipped adding scenes from script: all duplicate source shots', {
+        requested: scenes.length,
+        skippedDuplicateCount,
+      });
+      return;
+    }
+
     const startId = splitScenes.length > 0 ? Math.max(...splitScenes.map(s => s.id)) + 1 : 1;
     
-    const newScenes: SplitScene[] = scenes.map((scene, index) => ({
-      id: startId + index,
-      sceneName: scene.sceneName || '',
-      sceneLocation: scene.sceneLocation || '',
-      imageDataUrl: '',
-      imageHttpUrl: null,
-      width: 0,
-      height: 0,
-      // 三层提示词系统：优先使用专门的三层提示词，否则回退到旧的 promptEn/promptZh
-      imagePrompt: scene.imagePrompt || scene.promptEn || '',
-      imagePromptZh: scene.imagePromptZh || scene.promptZh || '',
-      videoPrompt: scene.videoPrompt || scene.promptEn || '',
-      videoPromptZh: scene.videoPromptZh || scene.promptZh,
-      endFramePrompt: scene.endFramePrompt || '',
-      endFramePromptZh: scene.endFramePromptZh || '',
-      needsEndFrame: scene.needsEndFrame || false,
-      row: 0,
-      col: 0,
-      sourceRect: { x: 0, y: 0, width: 0, height: 0 },
-      endFrameImageUrl: null,
-      endFrameHttpUrl: null,
-      endFrameSource: null,
-      endFrameStatus: 'idle' as const,
-      endFrameProgress: 0,
-      endFrameError: null,
-      characterIds: scene.characterIds || [],
-      emotionTags: scene.emotionTags || [],
-      shotSize: scene.shotSize || null,
-      duration: scene.duration || 5,
-      ambientSound: scene.ambientSound || '',
-      soundEffects: scene.soundEffects || [],
-      soundEffectText: scene.soundEffectText || '',
-      dialogue: scene.dialogue || '',
-      actionSummary: scene.actionSummary || '',
-      cameraMovement: scene.cameraMovement || '',
-      // 音频开关默认全部开启（背景音乐默认关闭）
-      audioAmbientEnabled: true,
-      audioSfxEnabled: true,
-      audioDialogueEnabled: true,
-      audioBgmEnabled: false,
-      backgroundMusic: scene.backgroundMusic || '',
-      // 场景库关联（自动匹配）
-      sceneLibraryId: scene.sceneLibraryId,
-      viewpointId: scene.viewpointId,
-      sceneReferenceImage: scene.sceneReferenceImage,
-      // 叙事驱动设计（基于《电影语言的语法》）
-      narrativeFunction: scene.narrativeFunction || '',
-      shotPurpose: scene.shotPurpose || '',
-      visualFocus: scene.visualFocus || '',
-      cameraPosition: scene.cameraPosition || '',
-      characterBlocking: scene.characterBlocking || '',
-      rhythm: scene.rhythm || '',
-      visualDescription: scene.visualDescription || '',
-      // 拍摄控制（灯光/焦点/器材/特效/速度）— 每个分镜独立
-      lightingStyle: scene.lightingStyle,
-      lightingDirection: scene.lightingDirection,
-      colorTemperature: scene.colorTemperature,
-      lightingNotes: scene.lightingNotes,
-      depthOfField: scene.depthOfField,
-      focusTarget: scene.focusTarget,
-      focusTransition: scene.focusTransition,
-      cameraRig: scene.cameraRig,
-      movementSpeed: scene.movementSpeed,
-      atmosphericEffects: scene.atmosphericEffects,
-      effectIntensity: scene.effectIntensity,
-      playbackSpeed: scene.playbackSpeed,
-      // 特殊拍摄手法
-      specialTechnique: scene.specialTechnique,
-      // 拍摄角度 / 焦距 / 摄影技法
-      cameraAngle: scene.cameraAngle,
-      focalLength: scene.focalLength,
-      photographyTechnique: scene.photographyTechnique,
-      imageStatus: 'idle' as const,
-      imageProgress: 0,
-      imageError: null,
-      videoStatus: 'idle' as const,
-      videoProgress: 0,
-      videoUrl: null,
-      videoError: null,
-      videoMediaId: null,
-    }));
+    const newScenes: SplitScene[] = dedupedScenes.map((scene, index) => {
+      const hydrated = {
+        id: startId + index,
+        sceneName: scene.sceneName || '',
+        sceneLocation: scene.sceneLocation || '',
+        imageDataUrl: '',
+        imageHttpUrl: null,
+        width: 0,
+        height: 0,
+        // 三层提示词系统：优先使用专门的三层提示词，否则回退到旧的 promptEn/promptZh
+        imagePrompt: scene.imagePrompt || scene.promptEn || '',
+        imagePromptZh: scene.imagePromptZh || scene.promptZh || '',
+        videoPrompt: scene.videoPrompt || scene.promptEn || '',
+        videoPromptZh: scene.videoPromptZh || scene.promptZh,
+        endFramePrompt: scene.endFramePrompt || '',
+        endFramePromptZh: scene.endFramePromptZh || '',
+        needsEndFrame: scene.needsEndFrame || false,
+        row: 0,
+        col: 0,
+        sourceRect: { x: 0, y: 0, width: 0, height: 0 },
+        endFrameImageUrl: null,
+        endFrameHttpUrl: null,
+        endFrameSource: null,
+        endFrameStatus: 'idle' as const,
+        endFrameProgress: 0,
+        endFrameError: null,
+        characterIds: scene.characterIds || [],
+        emotionTags: scene.emotionTags || [],
+        shotSize: scene.shotSize || null,
+        duration: scene.duration || 5,
+        sourceShotId: scene.sourceShotId,
+        sourceSceneId: scene.sourceSceneId,
+        sourceEpisodeId: scene.sourceEpisodeId,
+        ambientSound: scene.ambientSound || '',
+        soundEffects: scene.soundEffects || [],
+        soundEffectText: scene.soundEffectText || '',
+        dialogue: scene.dialogue || '',
+        actionSummary: scene.actionSummary || '',
+        cameraMovement: scene.cameraMovement || '',
+        // 音频开关默认全部开启（背景音乐默认关闭）
+        audioAmbientEnabled: true,
+        audioSfxEnabled: true,
+        audioDialogueEnabled: true,
+        audioBgmEnabled: false,
+        backgroundMusic: scene.backgroundMusic || '',
+        // 场景库关联（自动匹配）
+        sceneLibraryId: scene.sceneLibraryId,
+        viewpointId: scene.viewpointId,
+        sceneReferenceImage: scene.sceneReferenceImage,
+        // 叙事驱动设计（基于《电影语言的语法》）
+        narrativeFunction: scene.narrativeFunction || '',
+        shotPurpose: scene.shotPurpose || '',
+        visualFocus: scene.visualFocus || '',
+        cameraPosition: scene.cameraPosition || '',
+        characterBlocking: scene.characterBlocking || '',
+        rhythm: scene.rhythm || '',
+        visualDescription: scene.visualDescription || '',
+        // 拍摄控制（灯光/焦点/器材/特效/速度）— 每个分镜独立
+        lightingStyle: scene.lightingStyle,
+        lightingDirection: scene.lightingDirection,
+        colorTemperature: scene.colorTemperature,
+        lightingNotes: scene.lightingNotes,
+        depthOfField: scene.depthOfField,
+        focusTarget: scene.focusTarget,
+        focusTransition: scene.focusTransition,
+        cameraRig: scene.cameraRig,
+        movementSpeed: scene.movementSpeed,
+        atmosphericEffects: scene.atmosphericEffects,
+        effectIntensity: scene.effectIntensity,
+        playbackSpeed: scene.playbackSpeed,
+        // 特殊拍摄手法
+        specialTechnique: scene.specialTechnique,
+        // 拍摄角度 / 焦距 / 摄影技法
+        cameraAngle: scene.cameraAngle,
+        focalLength: scene.focalLength,
+        photographyTechnique: scene.photographyTechnique,
+        imageStatus: 'idle' as const,
+        imageProgress: 0,
+        imageError: null,
+        videoStatus: 'idle' as const,
+        videoProgress: 0,
+        videoUrl: null,
+        videoError: null,
+        videoMediaId: null,
+      };
+      return applyPromptFallback(hydrated, startId - 1 + index, storyPrompt);
+    });
     
     set({
       projects: {
@@ -1536,7 +1720,7 @@ export const useDirectorStore = create<DirectorStore>()(
       },
     });
     
-    console.log('[DirectorStore] Added', newScenes.length, 'scenes from script, total:', splitScenes.length + newScenes.length);
+    console.log('[DirectorStore] Added', newScenes.length, 'scenes from script, skipped duplicates:', skippedDuplicateCount, 'total:', splitScenes.length + newScenes.length);
   },
 
   // Workflow actions

@@ -210,7 +210,6 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
     // 视角切换历史
     addAngleSwitchHistory,
     deleteSplitScene,
-    resetStoryboard,
     // 预告片功能
     clearTrailer,
     // 摄影风格档案
@@ -360,9 +359,8 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
 
   // Handle go back
   const handleBack = useCallback(() => {
-    resetStoryboard();
     onBack?.();
-  }, [resetStoryboard, onBack]);
+  }, [onBack]);
 
   // Handle extract video last frame -> insert to next scene's first frame
   const handleExtractVideoLastFrame = useCallback(async (sceneId: number) => {

@@ -1331,9 +1331,10 @@ export function PropertyPanel({
               variant="secondary"
               className="w-full"
               onClick={() => onGoToDirectorFromScene?.(scene.id)}
+              disabled={!sceneShots || sceneShots.length === 0}
             >
               <Film className="h-4 w-4 mr-2" />
-              去AI导演生成视频
+              {(!sceneShots || sceneShots.length === 0) ? "先生成分镜" : "去AI导演生成视频"}
             </Button>
             <Button
               variant="outline"

@@ -115,20 +115,30 @@ const normalizeProjectAfterRehydrate = (project: ScriptProjectData): ScriptProje
   let next = project;
 
   if (next.parseStatus === 'parsing') {
+    const hasParsedResult = Boolean(next.scriptData);
     next = {
       ...next,
-      parseStatus: next.scriptData ? 'ready' : 'idle',
-      parseError: next.parseError || INTERRUPTED_TASK_MESSAGE,
+      parseStatus: hasParsedResult ? 'ready' : 'idle',
+      parseError: hasParsedResult ? undefined : (next.parseError || INTERRUPTED_TASK_MESSAGE),
     };
   }
 
   if (next.shotStatus === 'generating') {
+    const hasShotResult = next.shots.length > 0;
     next = {
       ...next,
-      shotStatus: next.shots.length > 0 ? 'ready' : 'idle',
-      shotError: next.shotError || INTERRUPTED_TASK_MESSAGE,
+      shotStatus: hasShotResult ? 'ready' : 'idle',
+      shotError: hasShotResult ? undefined : (next.shotError || INTERRUPTED_TASK_MESSAGE),
       batchProgress: null,
     };
+  }
+
+  // Cleanup stale false-positive interruption errors from older recovery logic.
+  if (next.parseStatus === 'idle' && next.parseError === INTERRUPTED_TASK_MESSAGE) {
+    next = { ...next, parseError: undefined };
+  }
+  if (next.shotStatus === 'idle' && next.shotError === INTERRUPTED_TASK_MESSAGE) {
+    next = { ...next, shotError: undefined };
   }
 
   return next;

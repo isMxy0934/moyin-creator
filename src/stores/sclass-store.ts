@@ -305,30 +305,60 @@ const INTERRUPTED_TASK_MESSAGE = '检测到上次任务中断，请重新发起�
 
 const normalizeShotGroupAfterRehydrate = (group: ShotGroup): ShotGroup => {
   if (group.videoStatus !== 'generating') return group;
+  const hasVideoResult = Boolean(group.videoUrl || group.videoMediaId);
   return {
     ...group,
-    videoStatus: 'failed',
-    videoError: group.videoError || INTERRUPTED_TASK_MESSAGE,
-    videoProgress: Math.min(group.videoProgress ?? 0, 99),
+    videoStatus: hasVideoResult ? 'completed' : 'failed',
+    videoError: hasVideoResult ? null : (group.videoError || INTERRUPTED_TASK_MESSAGE),
+    videoProgress: hasVideoResult ? 100 : Math.min(group.videoProgress ?? 0, 99),
   };
 };
 
 const normalizeSingleShotAfterRehydrate = (override: SingleShotOverride): SingleShotOverride => {
   if (override.videoStatus !== 'generating') return override;
+  const hasVideoResult = Boolean(override.videoUrl || override.videoMediaId);
   return {
     ...override,
-    videoStatus: 'failed',
-    videoError: override.videoError || INTERRUPTED_TASK_MESSAGE,
-    videoProgress: Math.min(override.videoProgress ?? 0, 99),
+    videoStatus: hasVideoResult ? 'completed' : 'failed',
+    videoError: hasVideoResult ? null : (override.videoError || INTERRUPTED_TASK_MESSAGE),
+    videoProgress: hasVideoResult ? 100 : Math.min(override.videoProgress ?? 0, 99),
   };
 };
 
 const normalizeProjectAfterRehydrate = (project: SClassProjectData): SClassProjectData => {
-  const shotGroups = project.shotGroups.map(normalizeShotGroupAfterRehydrate);
+  const shotGroups = project.shotGroups.map((group) => {
+    const normalized = normalizeShotGroupAfterRehydrate(group);
+    if (
+      normalized.videoStatus === 'failed' &&
+      normalized.videoError === INTERRUPTED_TASK_MESSAGE &&
+      !normalized.videoUrl &&
+      !normalized.videoMediaId
+    ) {
+      return {
+        ...normalized,
+        videoStatus: 'idle',
+        videoError: null,
+        videoProgress: 0,
+      };
+    }
+    return normalized;
+  });
 
   const singleShotOverrides: Record<number, SingleShotOverride> = {};
   for (const [sceneId, override] of Object.entries(project.singleShotOverrides)) {
-    singleShotOverrides[Number(sceneId)] = normalizeSingleShotAfterRehydrate(override);
+    const normalized = normalizeSingleShotAfterRehydrate(override);
+    singleShotOverrides[Number(sceneId)] =
+      normalized.videoStatus === 'failed' &&
+      normalized.videoError === INTERRUPTED_TASK_MESSAGE &&
+      !normalized.videoUrl &&
+      !normalized.videoMediaId
+        ? {
+            ...normalized,
+            videoStatus: 'idle',
+            videoError: null,
+            videoProgress: 0,
+          }
+        : normalized;
   }
 
   return {
