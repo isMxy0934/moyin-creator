@@ -39,9 +39,8 @@ export function StoryboardPreview({ onBack, onSplitComplete }: StoryboardPreview
   const [isSplitting, setIsSplitting] = useState(false);
   const [splitError, setSplitError] = useState<string | null>(null);
 
-  // Get current project data (including existing splitScenes from script import)
+  // Get current project data
   const projectData = useActiveDirectorProject();
-  const existingSplitScenes = projectData?.splitScenes || [];
   const storyboardImage = projectData?.storyboardImage || null;
   const storyboardStatus = projectData?.storyboardStatus || 'idle';
   const storyboardError = projectData?.storyboardError || null;
@@ -72,6 +71,11 @@ export function StoryboardPreview({ onBack, onSplitComplete }: StoryboardPreview
       toast.error("没有可处理的故事板图片");
       return;
     }
+
+    // 从 store 实时读取已有分镜（避免闭包过期）
+    const state = useDirectorStore.getState();
+    const activeId = state.activeProjectId;
+    const existingSplitScenes = (activeId ? state.projects[activeId]?.splitScenes : null) || [];
 
     setIsSplitting(true);
     setSplitError(null);
