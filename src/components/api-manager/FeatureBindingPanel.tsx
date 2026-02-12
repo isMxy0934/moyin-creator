@@ -43,13 +43,6 @@ interface ProviderOption {
   model: string;
 }
 
-interface ProviderGroup {
-  providerId: string;
-  platform: string;
-  name: string;
-  options: ProviderOption[];
-}
-
 interface FeatureMeta {
   key: AIFeature;
   name: string;
