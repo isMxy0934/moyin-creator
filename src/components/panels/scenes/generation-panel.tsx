@@ -566,9 +566,26 @@ ${gridItemsZh}
 
     try {
       // 获取该场景下所有分镜的动作描写，提取关键道具
-      const sceneShots = allShots.filter(shot => 
-        shot.sceneRefId === selectedScene?.id ||
-        shot.sceneId === selectedScene?.id
+      // 优先按 scene id 精确匹配；若场景库 id 与剧本 scene id 不一致，回退到 name/location 匹配。
+      const normalize = (v?: string) => (v || '').trim().toLowerCase();
+      const targetName = normalize(selectedScene?.name);
+      const targetLocation = normalize(selectedScene?.location);
+
+      const scriptSceneIds = new Set<string>();
+      if (selectedScene?.id) scriptSceneIds.add(selectedScene.id);
+      for (const scriptScene of currentProject?.scriptData?.scenes || []) {
+        const scriptName = normalize(scriptScene.name);
+        const scriptLocation = normalize(scriptScene.location);
+        if (
+          (targetName && (scriptName === targetName || scriptLocation === targetName)) ||
+          (targetLocation && (scriptName === targetLocation || scriptLocation === targetLocation))
+        ) {
+          scriptSceneIds.add(scriptScene.id);
+        }
+      }
+
+      const sceneShots = allShots.filter((shot) =>
+        scriptSceneIds.has(shot.sceneRefId || '') || scriptSceneIds.has(shot.sceneId || '')
       );
       const actionDescriptions = sceneShots
         .map(shot => shot.actionSummary)

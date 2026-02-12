@@ -1258,6 +1258,26 @@ function copyMissingFilesSync(src: string, dest: string): number {
   return copied
 }
 
+function shouldRepairLegacyDemoScenesFile(filePath: string): boolean {
+  try {
+    if (!fs.existsSync(filePath)) return false
+    const raw = fs.readFileSync(filePath, 'utf-8')
+    const parsed = JSON.parse(raw) as { state?: { scenes?: Array<{ name?: string }> } }
+    const scenes = parsed?.state?.scenes
+    if (!Array.isArray(scenes) || scenes.length < 4) return false
+
+    const names = scenes
+      .map((scene) => String(scene?.name || '').trim())
+      .filter(Boolean)
+    if (names.length < 4) return false
+
+    const onlyScene11 = names.every((name) => name.startsWith('1-1 '))
+    return onlyScene11
+  } catch {
+    return false
+  }
+}
+
 /**
  * Seed demo project exactly once.
  * Default behavior: demo is included on first startup.
@@ -1399,6 +1419,13 @@ function seedDemoProject() {
         copiedProjectDirCount++
       } else {
         repairedFileCount += copyMissingFilesSync(srcProjectDir, dstProjectDir)
+        const srcScenesFile = path.join(srcProjectDir, 'scenes.json')
+        const dstScenesFile = path.join(dstProjectDir, 'scenes.json')
+        if (fs.existsSync(srcScenesFile) && shouldRepairLegacyDemoScenesFile(dstScenesFile)) {
+          fs.copyFileSync(srcScenesFile, dstScenesFile)
+          repairedFileCount++
+          console.log(`[Seed] Repaired legacy duplicated demo scenes for project ${demoProject.id}`)
+        }
       }
     }
 

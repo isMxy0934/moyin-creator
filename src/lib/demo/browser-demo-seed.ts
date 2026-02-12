@@ -91,6 +91,20 @@ function ensureCharacterStoreCompatibility(): void {
   writeCompat(CHARACTER_STORE_KEYS, payload);
 }
 
+function shouldRepairLegacyDemoScenes(raw: string | null): boolean {
+  const parsed = parseJSON<{ state?: { scenes?: Array<{ name?: string }> } }>(raw);
+  const scenes = parsed?.state?.scenes;
+  if (!Array.isArray(scenes) || scenes.length < 4) return false;
+
+  const names = scenes
+    .map((scene) => String(scene?.name || "").trim())
+    .filter(Boolean);
+  if (names.length < 4) return false;
+
+  const onlyScene11 = names.every((name) => name.startsWith("1-1 "));
+  return onlyScene11;
+}
+
 /**
  * Seed demo data for plain browser mode (non-Electron).
  */
@@ -151,8 +165,14 @@ export function seedDemoForBrowserMode(): void {
     const shouldRepairDemoKeys = currentProjects.some((p) => p.id === DEMO_PROJECT_ID);
     if (shouldRepairDemoKeys) {
       for (const [key, payload] of Object.entries(DEMO_PROJECT_PAYLOADS)) {
-        if (!localStorage.getItem(key)) {
+        const existing = localStorage.getItem(key);
+        if (!existing) {
           localStorage.setItem(key, payload);
+          continue;
+        }
+        if (key.endsWith("/scenes") && shouldRepairLegacyDemoScenes(existing)) {
+          localStorage.setItem(key, payload);
+          console.log("[BrowserSeed] Repaired legacy duplicated demo scenes.");
         }
       }
       for (const [key, payload] of Object.entries(DEMO_SHARED_PAYLOADS)) {
@@ -172,4 +192,3 @@ export function seedDemoForBrowserMode(): void {
     console.warn("[BrowserSeed] Failed to seed demo project:", error);
   }
 }
-

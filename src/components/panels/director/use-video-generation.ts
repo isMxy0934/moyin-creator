@@ -5,6 +5,13 @@ import { getFeatureConfig } from "@/lib/ai/feature-router";
 import { saveVideoToLocal } from "@/lib/image-storage";
 import { normalizeUrl } from "./use-image-generation";
 import { useAPIConfigStore } from "@/stores/api-config-store";
+import {
+  createMockImageDataUrl,
+  createMockTaskId,
+  createMockVideoUrl,
+  isTestModeEnabled,
+  waitForTestModeLatency,
+} from "@/lib/ai/test-mode";
 
 type HttpProxyResponse = {
   ok: boolean
@@ -181,6 +188,21 @@ export async function convertToHttpUrl(rawUrl: unknown): Promise<string> {
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return url;
   }
+
+  // Test mode should never require image-host upload.
+  if (isTestModeEnabled()) {
+    if (url.startsWith('local-image://')) {
+      const { readImageAsBase64 } = await import('@/lib/image-storage');
+      const base64 = await readImageAsBase64(url);
+      if (!base64) {
+        return createMockImageDataUrl(createMockTaskId('local-image-fallback'), {
+          label: 'Test Mode Local Image',
+        });
+      }
+      return base64;
+    }
+    return url;
+  }
   
   // For base64/local data URLs, upload to image host
   const { uploadToImageHost, isImageHostConfigured } = await import('@/lib/image-host');
@@ -334,6 +356,16 @@ export async function callVideoGenerationApi(
   if (!resolvedPlatform) {
     throw new Error('请先在设置中配置视频生成服务映射');
   }
+
+  if (isTestModeEnabled() || resolvedPlatform === 'mock') {
+    onProgress?.(20);
+    await waitForTestModeLatency();
+    onProgress?.(60);
+    await waitForTestModeLatency();
+    onProgress?.(100);
+    return createMockVideoUrl(createMockTaskId('video'));
+  }
+
   const model = featureConfig?.models?.[0];
   if (!model) {
     throw new Error('请先在设置中配置视频生成模型');

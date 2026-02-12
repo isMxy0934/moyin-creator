@@ -24,6 +24,7 @@ function shouldIntercept(url: URL): boolean {
   if (url.pathname.startsWith("/api/ai/")) return true;
   if (url.pathname.startsWith("/api/upload")) return true;
   if (/\/v1\/(images|videos|tasks|chat)\//.test(url.pathname)) return true;
+  if (/\/v1\/video\//.test(url.pathname)) return true;
   if (url.pathname.endsWith("/query")) return true;
   return false;
 }
@@ -316,6 +317,20 @@ async function buildMockResponse(request: Request, url: URL): Promise<Response> 
     return jsonResponse({
       data: [{ task_id: createMockTaskId("v1-video") }],
       estimated_time: 1,
+    });
+  }
+
+  if (/\/v1\/video\/create$/.test(url.pathname)) {
+    return jsonResponse({
+      id: createMockTaskId("v1-video-create"),
+      status: "queued",
+    });
+  }
+
+  if (/\/v1\/video\/query$/.test(url.pathname)) {
+    return jsonResponse({
+      status: "completed",
+      video_url: createMockVideoUrl(createMockTaskId("v1-video-query")),
     });
   }
 

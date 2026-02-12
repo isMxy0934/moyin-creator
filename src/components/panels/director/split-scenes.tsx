@@ -63,6 +63,7 @@ import { parseApiKeys } from "@/lib/api-key-manager";
 import { getFeatureConfig, getFeatureNotConfiguredMessage } from "@/lib/ai/feature-router";
 import { submitGridImageRequest } from "@/lib/ai/image-generator";
 import { saveVideoToLocal, readImageAsBase64 } from '@/lib/image-storage';
+import { createMockImageDataUrl, createMockTaskId, isTestModeEnabled } from "@/lib/ai/test-mode";
 import { callVideoGenerationApi, isContentModerationError } from './use-video-generation';
 import { persistSceneImage } from '@/lib/utils/image-persist';
 import {
@@ -1344,10 +1345,16 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
       }
       
       if (!firstFrameUrl) {
-        toast.error(`分镜 ${sceneId + 1} 没有首帧图片，请先生成图片`);
-        setIsGenerating(false);
-        setCurrentGeneratingId(null);
-        return;
+        if (isTestModeEnabled() || platform === 'mock') {
+          firstFrameUrl = createMockImageDataUrl(createMockTaskId(`missing-first-frame-${sceneId}`), {
+            label: `Test Mode Scene ${sceneId + 1}`,
+          });
+        } else {
+          toast.error(`分镜 ${sceneId + 1} 没有首帧图片，请先生成图片`);
+          setIsGenerating(false);
+          setCurrentGeneratingId(null);
+          return;
+        }
       }
       console.log('[SplitScenes] First frame source:', firstFrameUrl.startsWith('http') ? 'HTTP URL' : 'local/base64');
       
@@ -1427,6 +1434,19 @@ export function SplitScenes({ onBack, onGenerateVideos }: SplitScenesProps) {
         // Already HTTP URL - use directly
         if (url.startsWith('http://') || url.startsWith('https://')) {
           console.log('[SplitScenes] Using existing HTTP URL:', url.substring(0, 60));
+          return url;
+        }
+
+        if (isTestModeEnabled() || platform === 'mock') {
+          if (url.startsWith('local-image://')) {
+            const fullBase64 = await readImageAsBase64(url);
+            if (!fullBase64) {
+              return createMockImageDataUrl(createMockTaskId('local-image-fallback'), {
+                label: 'Test Mode Local Image',
+              });
+            }
+            return fullBase64;
+          }
           return url;
         }
         
