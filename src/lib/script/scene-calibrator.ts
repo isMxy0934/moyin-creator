@@ -480,26 +480,37 @@ ${sceneListForAI}
     };
   } catch (error) {
     console.error('[SceneCalibrator] AI校准失败:', error);
-    // 返回基于统计的降级方案
-    const fallbackScenes: CalibratedScene[] = Array.from(stats.values())
-      .sort((a, b) => b.appearanceCount - a.appearanceCount)
-      .map((s, i) => ({
-        id: `scene_${i + 1}`,
-        name: s.name,
-        location: s.location,
-        time: s.times[0] || 'day',
-        atmosphere: '平静',
-        importance: (s.appearanceCount >= 5 ? 'main' : 
-                    s.appearanceCount >= 2 ? 'secondary' : 'transition') as any,
-        episodeNumbers: s.episodeNumbers,
-        appearanceCount: s.appearanceCount,
-        nameVariants: [s.name],
-      }));
+    // 降级方案：保留 currentScenes 的原始 ID 和数据，仅补充统计信息
+    const fallbackScenes: CalibratedScene[] = currentScenes.map((orig) => {
+      // 查找统计信息
+      const normalizedLoc = orig.location?.replace(/\s+/g, '').toLowerCase() || '';
+      let sceneStat: SceneStats | undefined;
+      for (const [key, stat] of stats) {
+        if (key.includes(normalizedLoc) || normalizedLoc.includes(key) ||
+            stat.name === orig.name || stat.location === orig.location) {
+          sceneStat = stat;
+          break;
+        }
+      }
+      const appearCount = sceneStat?.appearanceCount || 1;
+      return {
+        id: orig.id, // 【关键】保留原始 ID，避免破坏关联
+        name: orig.name || orig.location,
+        location: orig.location,
+        time: orig.time || 'day',
+        atmosphere: orig.atmosphere || '平静',
+        importance: (appearCount >= 5 ? 'main' :
+                    appearCount >= 2 ? 'secondary' : 'transition') as 'main' | 'secondary' | 'transition',
+        episodeNumbers: sceneStat?.episodeNumbers || [],
+        appearanceCount: appearCount,
+        nameVariants: [orig.name || orig.location],
+      };
+    });
     
     return {
       scenes: fallbackScenes,
       mergeRecords: [],
-      analysisNotes: 'AI校准失败，返回基于统计的结果',
+      analysisNotes: 'AI校准失败，保留原始场景数据并补充统计信息',
     };
   }
 }

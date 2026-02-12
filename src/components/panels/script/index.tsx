@@ -11,7 +11,7 @@
  * 右栏：属性面板和跳转操作
  */
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useScriptStore, useActiveScriptProject } from "@/stores/script-store";
 import { useProjectStore } from "@/stores/project-store";
 import { useAPIConfigStore } from "@/stores/api-config-store";
@@ -151,11 +151,16 @@ export function ScriptView() {
   
   // 场景校准状态
   const [sceneCalibrationStatus, setSceneCalibrationStatus] = useState<'idle' | 'calibrating' | 'completed' | 'error'>('idle');
-  // 视角分析状态（强制工作流）
+  // 视角分析状态（用于分镜生成时的 AI 视角分析）
   const [viewpointAnalysisStatus, setViewpointAnalysisStatus] = useState<'idle' | 'analyzing' | 'completed' | 'error'>('idle');
+  // 分镜校准状态（用于二次校准按钮触发的分镜校准，独立于视角分析）
+  const [shotCalibrationStatus, setShotCalibrationStatus] = useState<'idle' | 'calibrating' | 'completed' | 'error'>('idle');
   
   // 单个分镜校准状态
   const [singleShotCalibrationStatus, setSingleShotCalibrationStatus] = useState<Record<string, 'idle' | 'calibrating' | 'completed' | 'error'>>({});
+  
+  // 导入流程取消控制器（切换项目或组件卸载时取消正在进行的导入）
+  const importAbortRef = useRef<AbortController | null>(null);
   
   // 二次校准追踪（中栏独立按钮触发时标记，用于进度面板区分首次/二次）
   const [secondPassTypes, setSecondPassTypes] = useState<Set<string>>(new Set());
@@ -181,8 +186,12 @@ export function ScriptView() {
   const hasDirectorStoryboard = Boolean(directorProject?.storyboardImage);
 
   // Sync activeProjectId from project-store to script-store
+  // 切换项目时取消正在进行的导入
   useEffect(() => {
     if (activeProjectId) {
+      // 取消上一个项目的导入操作
+      importAbortRef.current?.abort();
+      importAbortRef.current = null;
       setActiveProjectId(activeProjectId);
       ensureProject(activeProjectId);
     }
@@ -323,6 +332,12 @@ export function ScriptView() {
       return;
     }
 
+    // 取消前一次未完成的导入
+    importAbortRef.current?.abort();
+    const abortController = new AbortController();
+    importAbortRef.current = abortController;
+    const isAborted = () => abortController.signal.aborted;
+
     const featureConfig = getFeatureConfig('script_analysis');
     const hasAI = !!featureConfig;
 
@@ -344,6 +359,7 @@ export function ScriptView() {
       );
       
       // 2. 校准（缺标题的集）
+      if (isAborted()) return;
       const missingTitles = getMissingTitleEpisodes(projectId);
       if (missingTitles.length > 0 && hasAI) {
         setMissingTitleCount(missingTitles.length);
@@ -374,6 +390,7 @@ export function ScriptView() {
       }
       
       // 3. 生成（每集大纲）
+      if (isAborted()) return;
       if (hasAI && result.episodes.length > 0) {
         toast.info(`正在为 ${result.episodes.length} 集生成大纲...`);
         setSynopsisStatus('generating');
@@ -402,19 +419,22 @@ export function ScriptView() {
       }
       
       // 4. 生成（第1集分镜）——此时元数据与大纲已就绪
+      if (isAborted()) return;
       let viewpointResult: { viewpointAnalyzed: boolean; viewpointSkippedReason?: string } | null = null;
       if (result.episodes.length > 0) {
         toast.info("正在自动生成第1集分镜...");
         await new Promise(resolve => setTimeout(resolve, 500));
+        if (isAborted()) return;
         viewpointResult = await handleGenerateEpisodeShots(1);
       }
       
       // 5. 校准（角色）
+      if (isAborted()) return;
       if (hasAI && rawCharacterCount > 0 && result.scriptData && result.projectBackground) {
-        // 强制工作流：AI 视角分析未执行，不进入角色校准
+        // 视角分析未执行时，仅警告但不阻止角色校准（手动校准也不阻止）
         if (!viewpointResult?.viewpointAnalyzed) {
-          toast.error(`AI 视角分析未执行，已阻止角色校准：${viewpointResult?.viewpointSkippedReason || '未知原因'}`);
-          return;
+          console.warn(`[ScriptView] AI 视角分析未执行：${viewpointResult?.viewpointSkippedReason || '未知原因'}，角色校准继续`);
+          toast.warning(`AI 视角分析未执行，角色校准仍将继续`);
         }
         toast.info(`正在 AI 校准 ${rawCharacterCount} 个角色...`);
         setCharacterCalibrationStatus('calibrating');
@@ -426,6 +446,8 @@ export function ScriptView() {
             result.projectBackground,
             result.episodes
           );
+          
+          if (isAborted()) return;
           
           // 转换并更新角色列表
           const sortedChars = sortByImportance(calibResult.characters);
@@ -466,6 +488,7 @@ export function ScriptView() {
       }
       
     } catch (error) {
+      if (isAborted()) return; // 被取消则静默退出
       const err = error as Error;
       console.error("[ScriptView] Import failed:", err);
       setImportStatus('error');
@@ -575,7 +598,7 @@ export function ScriptView() {
     }
     
     addSecondPass('shots');
-    setViewpointAnalysisStatus('analyzing');
+    setShotCalibrationStatus('calibrating');
     toast.info(`正在校准第 ${episodeIndex} 集的分镜...`);
     
     try {
@@ -596,7 +619,7 @@ export function ScriptView() {
       );
       
       if (result.success) {
-        setViewpointAnalysisStatus('completed');
+        setShotCalibrationStatus('completed');
         removeSecondPass('shots');
         toast.success(`分镜校准完成！已优化 ${result.calibratedCount}/${result.totalShots} 个分镜`);
       } else {
@@ -605,7 +628,7 @@ export function ScriptView() {
     } catch (error) {
       const err = error as Error;
       console.error("[ScriptView] Shot calibration failed:", err);
-      setViewpointAnalysisStatus('error');
+      setShotCalibrationStatus('error');
       removeSecondPass('shots');
       toast.error(`分镜校准失败: ${err.message}`);
     }
@@ -630,7 +653,7 @@ export function ScriptView() {
     const sceneName = scene?.name || scene?.location || '场景';
 
     addSecondPass('shots');
-    setViewpointAnalysisStatus('analyzing');
+    setShotCalibrationStatus('calibrating');
     toast.info(`正在校准「${sceneName}」的分镜...`);
 
     try {
@@ -652,7 +675,7 @@ export function ScriptView() {
       );
 
       if (result.success) {
-        setViewpointAnalysisStatus('completed');
+        setShotCalibrationStatus('completed');
         removeSecondPass('shots');
         toast.success(`「${sceneName}」分镜校准完成！已优化 ${result.calibratedCount}/${result.totalShots} 个分镜`);
       } else {
@@ -661,7 +684,7 @@ export function ScriptView() {
     } catch (error) {
       const err = error as Error;
       console.error("[ScriptView] Scene shot calibration failed:", err);
-      setViewpointAnalysisStatus('error');
+      setShotCalibrationStatus('error');
       removeSecondPass('shots');
       toast.error(`分镜校准失败: ${err.message}`);
     }
@@ -2269,6 +2292,7 @@ export function ScriptView() {
             synopsisStatus={synopsisStatus}
             missingSynopsisCount={missingSynopsisCount}
             viewpointAnalysisStatus={viewpointAnalysisStatus}
+            shotCalibrationStatus={shotCalibrationStatus}
             characterCalibrationStatus={characterCalibrationStatus}
             sceneCalibrationStatus={sceneCalibrationStatus}
             secondPassTypes={secondPassTypes}

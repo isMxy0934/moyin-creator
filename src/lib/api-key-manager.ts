@@ -362,20 +362,29 @@ export class ApiKeyManager {
 
 // ==================== Provider Key Managers ====================
 
-// Global map of ApiKeyManagers per provider
-const providerManagers = new Map<string, ApiKeyManager>();
+// Global map of ApiKeyManagers per provider (with key fingerprint for change detection)
+const providerManagers = new Map<string, { manager: ApiKeyManager; keyString: string }>();
 
 /**
  * Get or create an ApiKeyManager for a provider
+ * Automatically resets when the apiKey string changes
  */
 export function getProviderKeyManager(providerId: string, apiKey: string): ApiKeyManager {
-  let manager = providerManagers.get(providerId);
+  const existing = providerManagers.get(providerId);
   
-  if (!manager) {
-    manager = new ApiKeyManager(apiKey);
-    providerManagers.set(providerId, manager);
+  if (existing && existing.keyString === apiKey) {
+    return existing.manager;
   }
   
+  // Key changed or new provider — create/reset manager
+  if (existing) {
+    existing.manager.reset(apiKey);
+    existing.keyString = apiKey;
+    return existing.manager;
+  }
+  
+  const manager = new ApiKeyManager(apiKey);
+  providerManagers.set(providerId, { manager, keyString: apiKey });
   return manager;
 }
 
@@ -383,11 +392,12 @@ export function getProviderKeyManager(providerId: string, apiKey: string): ApiKe
  * Update the keys for a provider's manager
  */
 export function updateProviderKeys(providerId: string, apiKey: string): void {
-  const manager = providerManagers.get(providerId);
-  if (manager) {
-    manager.reset(apiKey);
+  const existing = providerManagers.get(providerId);
+  if (existing) {
+    existing.manager.reset(apiKey);
+    existing.keyString = apiKey;
   } else {
-    providerManagers.set(providerId, new ApiKeyManager(apiKey));
+    providerManagers.set(providerId, { manager: new ApiKeyManager(apiKey), keyString: apiKey });
   }
 }
 

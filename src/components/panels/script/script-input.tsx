@@ -103,8 +103,10 @@ interface ScriptInputProps {
   onGenerateSynopses?: () => Promise<void>;
   synopsisStatus?: 'idle' | 'generating' | 'completed' | 'error';
   missingSynopsisCount?: number;
-  // 分镜生成状态
+  // 分镜生成时的视角分析状态
   viewpointAnalysisStatus?: 'idle' | 'analyzing' | 'completed' | 'error';
+  // 二次分镜校准状态（独立于视角分析）
+  shotCalibrationStatus?: 'idle' | 'calibrating' | 'completed' | 'error';
   // 角色校准状态
   characterCalibrationStatus?: 'idle' | 'calibrating' | 'completed' | 'error';
   // 场景校准状态
@@ -141,6 +143,7 @@ export function ScriptInput({
   synopsisStatus,
   missingSynopsisCount,
   viewpointAnalysisStatus,
+  shotCalibrationStatus,
   characterCalibrationStatus,
   sceneCalibrationStatus,
   secondPassTypes,
@@ -241,7 +244,8 @@ export function ScriptInput({
             {(importStatus === 'importing' || 
               calibrationStatus === 'calibrating' || 
               synopsisStatus === 'generating' || 
-              viewpointAnalysisStatus === 'analyzing' || 
+              viewpointAnalysisStatus === 'analyzing' ||
+              shotCalibrationStatus === 'calibrating' || 
               characterCalibrationStatus === 'calibrating' ||
               sceneCalibrationStatus === 'calibrating') && (
               <div className="p-4 rounded-xl bg-primary/10 border-2 border-primary/30 space-y-3 shadow-lg">
@@ -258,10 +262,10 @@ export function ScriptInput({
                     <>
                       {/* 分镜校准（二次） */}
                       {secondPassTypes.has('shots') && (
-                        <div className={`flex items-center gap-3 py-1 ${viewpointAnalysisStatus === 'analyzing' ? 'text-primary font-bold' : viewpointAnalysisStatus === 'completed' ? 'text-green-600 font-medium' : 'text-muted-foreground'}`}>
-                          {viewpointAnalysisStatus === 'analyzing' ? (
+                        <div className={`flex items-center gap-3 py-1 ${shotCalibrationStatus === 'calibrating' ? 'text-primary font-bold' : shotCalibrationStatus === 'completed' ? 'text-green-600 font-medium' : 'text-muted-foreground'}`}>
+                          {shotCalibrationStatus === 'calibrating' ? (
                             <Loader2 className="h-5 w-5 animate-spin" />
-                          ) : viewpointAnalysisStatus === 'completed' ? (
+                          ) : shotCalibrationStatus === 'completed' ? (
                             <span className="text-lg">✓</span>
                           ) : (
                             <span className="w-5 h-5 rounded-full border-2 border-current" />
