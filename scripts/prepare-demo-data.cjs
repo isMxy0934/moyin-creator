@@ -23,6 +23,7 @@ const OUTPUT_MEDIA = path.join(OUTPUT_ROOT, 'media')
 const SRC_PROJECTS = path.join(SOURCE_BASE, 'projects')
 const SRC_MEDIA = path.join(SOURCE_BASE, 'media')
 const SRC_PROJECT_DIR = path.join(SRC_PROJECTS, '_p', DEMO_PROJECT_ID)
+const CHARACTER_LIBRARY_FILENAMES = ['mumu-character-library.json', 'moyin-character-library.json']
 
 // ==================== Helpers ====================
 function ensureDir(dirPath) {
@@ -32,6 +33,14 @@ function ensureDir(dirPath) {
 function readJSON(filePath) {
   const raw = fs.readFileSync(filePath, 'utf-8')
   return JSON.parse(raw)
+}
+
+function resolveFirstExisting(baseDir, candidates) {
+  for (const name of candidates) {
+    const fullPath = path.join(baseDir, name)
+    if (fs.existsSync(fullPath)) return fullPath
+  }
+  throw new Error(`None of these files exist under ${baseDir}: ${candidates.join(', ')}`)
 }
 
 function writeJSON(filePath, data) {
@@ -56,7 +65,7 @@ function deepReplace(obj, search, replace) {
 
 // ==================== 1. Project Store ====================
 function prepareProjectStore() {
-  console.log('\n[1] moyin-project-store.json')
+  console.log('\n[1] mumu-project-store.json')
   const data = {
     state: {
       projects: [{
@@ -69,7 +78,7 @@ function prepareProjectStore() {
     },
     version: 0,
   }
-  writeJSON(path.join(OUTPUT_PROJECTS, 'moyin-project-store.json'), data)
+  writeJSON(path.join(OUTPUT_PROJECTS, 'mumu-project-store.json'), data)
 }
 
 // ==================== 2. Script ====================
@@ -112,7 +121,7 @@ function prepareDirector() {
 function prepareCharacters() {
   console.log('\n[4] characters.json (per-project)')
   // Read the global character library to get 沈星晴's full data
-  const libSrc = path.join(SRC_PROJECTS, 'moyin-character-library.json')
+  const libSrc = resolveFirstExisting(SRC_PROJECTS, CHARACTER_LIBRARY_FILENAMES)
   const libData = readJSON(libSrc)
   const chars = (libData.state || libData).characters || []
   const shenxingqing = chars.find(c => c.id === KEEP_CHAR_ID)
@@ -187,10 +196,10 @@ function prepareSclass() {
   writeJSON(path.join(OUTPUT_PROJECTS, '_p', DEMO_PROJECT_ID, 'sclass.json'), data)
 }
 
-// ==================== 8. Character Library (global/legacy) ====================
+// ==================== 8. Character Library (global) ====================
 function prepareCharacterLibrary() {
-  console.log('\n[8] moyin-character-library.json (global)')
-  const libSrc = path.join(SRC_PROJECTS, 'moyin-character-library.json')
+  console.log('\n[8] mumu-character-library.json (global)')
+  const libSrc = resolveFirstExisting(SRC_PROJECTS, CHARACTER_LIBRARY_FILENAMES)
   const libData = readJSON(libSrc)
   const chars = (libData.state || libData).characters || []
   const shenxingqing = chars.find(c => c.id === KEEP_CHAR_ID)
@@ -210,7 +219,7 @@ function prepareCharacterLibrary() {
     },
     version: 0,
   }
-  writeJSON(path.join(OUTPUT_PROJECTS, 'moyin-character-library.json'), data)
+  writeJSON(path.join(OUTPUT_PROJECTS, 'mumu-character-library.json'), data)
 }
 
 // ==================== 9. Shared (empty) ====================

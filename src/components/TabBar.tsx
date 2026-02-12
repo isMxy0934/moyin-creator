@@ -53,7 +53,7 @@ export function TabBar() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <a
-                  href="https://github.com/MemeCalculate/moyin-creator/blob/main/docs/WORKFLOW_GUIDE.md"
+                  href="https://github.com/MemeCalculate/mumu-creator/blob/main/docs/WORKFLOW_GUIDE.md"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="w-full flex flex-col items-center py-2 text-muted-foreground hover:text-foreground transition-colors"
@@ -165,7 +165,7 @@ export function TabBar() {
           <Tooltip>
             <TooltipTrigger asChild>
               <a
-                href="https://github.com/MemeCalculate/moyin-creator/blob/main/docs/WORKFLOW_GUIDE.md"
+                href="https://github.com/MemeCalculate/mumu-creator/blob/main/docs/WORKFLOW_GUIDE.md"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="w-full flex flex-col items-center py-2 text-muted-foreground hover:text-foreground transition-colors"
