@@ -39,8 +39,9 @@ export function StoryboardPreview({ onBack, onSplitComplete }: StoryboardPreview
   const [isSplitting, setIsSplitting] = useState(false);
   const [splitError, setSplitError] = useState<string | null>(null);
 
-  // Get current project data
+  // Get current project data (including existing splitScenes from script import)
   const projectData = useActiveDirectorProject();
+  const existingSplitScenes = projectData?.splitScenes || [];
   const storyboardImage = projectData?.storyboardImage || null;
   const storyboardStatus = projectData?.storyboardStatus || 'idle';
   const storyboardError = projectData?.storyboardError || null;
@@ -79,51 +80,64 @@ export function StoryboardPreview({ onBack, onSplitComplete }: StoryboardPreview
     try {
       // If only 1 scene, skip splitting and use the whole image directly
       if (storyboardConfig.sceneCount === 1) {
-        const singleScene = {
-          id: 1,
-          sceneName: '',
-          sceneLocation: '',
-          imageDataUrl: storyboardImage,
-          imageHttpUrl: null,
-          width: 0, // Will be determined when image loads
-          height: 0,
-          imagePrompt: '',
-          imagePromptZh: '',
-          videoPrompt: '',
-          videoPromptZh: '场景 1',
-          needsEndFrame: false,
-          endFramePrompt: '',
-          endFramePromptZh: '',
-          endFrameHttpUrl: null,
-          endFrameStatus: 'idle' as const,
-          endFrameProgress: 0,
-          endFrameError: null,
-          row: 0,
-          col: 0,
-          sourceRect: { x: 0, y: 0, width: 0, height: 0 },
-          endFrameImageUrl: null,
-          endFrameSource: null,
-          characterIds: [],
-          emotionTags: [],
-          shotSize: null,
-          duration: 5,
-          ambientSound: '',
-          soundEffects: [],
-          soundEffectText: '',
-          dialogue: '',
-          actionSummary: '',
-          cameraMovement: '',
-          imageStatus: 'completed' as const,
-          imageProgress: 100,
-          imageError: null,
-          videoStatus: 'idle' as const,
-          videoProgress: 0,
-          videoUrl: null,
-          videoError: null,
-          videoMediaId: null,
-        };
-
-        setSplitScenes([singleScene]);
+        // 如果已有从剧本导入的分镜，合并第一帧图到第一个分镜上
+        if (existingSplitScenes.length > 0) {
+          const merged = existingSplitScenes.map((s, idx) => ({
+            ...s,
+            // 只有第一个分镜获得故事板图片作为首帧
+            ...(idx === 0 ? {
+              imageDataUrl: storyboardImage,
+              imageStatus: 'completed' as const,
+              imageProgress: 100,
+            } : {}),
+          }));
+          setSplitScenes(merged);
+        } else {
+          const singleScene = {
+            id: 1,
+            sceneName: '',
+            sceneLocation: '',
+            imageDataUrl: storyboardImage,
+            imageHttpUrl: null,
+            width: 0,
+            height: 0,
+            imagePrompt: '',
+            imagePromptZh: '',
+            videoPrompt: '',
+            videoPromptZh: '场景 1',
+            needsEndFrame: false,
+            endFramePrompt: '',
+            endFramePromptZh: '',
+            endFrameHttpUrl: null,
+            endFrameStatus: 'idle' as const,
+            endFrameProgress: 0,
+            endFrameError: null,
+            row: 0,
+            col: 0,
+            sourceRect: { x: 0, y: 0, width: 0, height: 0 },
+            endFrameImageUrl: null,
+            endFrameSource: null,
+            characterIds: [],
+            emotionTags: [],
+            shotSize: null,
+            duration: 5,
+            ambientSound: '',
+            soundEffects: [],
+            soundEffectText: '',
+            dialogue: '',
+            actionSummary: '',
+            cameraMovement: '',
+            imageStatus: 'completed' as const,
+            imageProgress: 100,
+            imageError: null,
+            videoStatus: 'idle' as const,
+            videoProgress: 0,
+            videoUrl: null,
+            videoError: null,
+            videoMediaId: null,
+          };
+          setSplitScenes([singleScene]);
+        }
         setStoryboardStatus('editing');
         toast.success('已进入场景编辑');
         onSplitComplete?.();
@@ -147,55 +161,132 @@ export function StoryboardPreview({ onBack, onSplitComplete }: StoryboardPreview
         throw new Error("切割结果为空，请检查图片是否正确");
       }
 
-      // Convert split results to SplitScene format
-      // Note: setSplitScenes will initialize missing fields with defaults
-      const splitScenes = splitResults.map((result: SplitResult, index: number) => ({
-        id: index + 1,
-        sceneName: '',
-        sceneLocation: '',
-        imageDataUrl: result.dataUrl,
-        imageHttpUrl: null,
-        width: result.width,
-        height: result.height,
-        imagePrompt: '',
-        imagePromptZh: '',
-        videoPrompt: '', // 英文提示词，等待 AI 生成
-        videoPromptZh: `场景 ${index + 1}`, // 中文提示词默认值
-        needsEndFrame: false,
-        endFramePrompt: '',
-        endFramePromptZh: '',
-        endFrameHttpUrl: null,
-        endFrameStatus: 'idle' as const,
-        endFrameProgress: 0,
-        endFrameError: null,
-        row: result.row,
-        col: result.col,
-        sourceRect: result.sourceRect,
-        endFrameImageUrl: null,
-        endFrameSource: null,
-        characterIds: [],
-        emotionTags: [],
-        shotSize: null,
-        duration: 5, // 默认 5 秒，支持 4-12 秒
-        ambientSound: '',
-        soundEffects: [],
-        soundEffectText: '',
-        dialogue: '',
-        actionSummary: '',
-        cameraMovement: '',
-        imageStatus: 'completed' as const,
-        imageProgress: 100,
-        imageError: null,
-        videoStatus: 'idle' as const,
-        videoProgress: 0,
-        videoUrl: null,
-        videoError: null,
-        videoMediaId: null,
-      }));
-
-      setSplitScenes(splitScenes);
+      // 如果已有从剧本导入的分镜，将切割图片按顺序合并到已有分镜上
+      if (existingSplitScenes.length > 0) {
+        const merged = existingSplitScenes.map((s, idx) => {
+          const splitResult = splitResults[idx]; // 按序号一一对应
+          if (splitResult) {
+            return {
+              ...s,
+              // 将故事板切割的图片作为首帧
+              imageDataUrl: splitResult.dataUrl,
+              imageHttpUrl: null,
+              width: splitResult.width,
+              height: splitResult.height,
+              row: splitResult.row,
+              col: splitResult.col,
+              sourceRect: splitResult.sourceRect,
+              imageStatus: 'completed' as const,
+              imageProgress: 100,
+              imageError: null,
+            };
+          }
+          return s; // 超出切割数量的分镜保持原样
+        });
+        
+        // 如果切割图片比已有分镜多，多余的作为新场景追加
+        if (splitResults.length > existingSplitScenes.length) {
+          const maxId = Math.max(...existingSplitScenes.map(s => s.id), 0);
+          for (let i = existingSplitScenes.length; i < splitResults.length; i++) {
+            const result = splitResults[i];
+            merged.push({
+              id: maxId + (i - existingSplitScenes.length) + 1,
+              sceneName: '',
+              sceneLocation: '',
+              imageDataUrl: result.dataUrl,
+              imageHttpUrl: null,
+              width: result.width,
+              height: result.height,
+              imagePrompt: '',
+              imagePromptZh: '',
+              videoPrompt: '',
+              videoPromptZh: `场景 ${i + 1}`,
+              needsEndFrame: false,
+              endFramePrompt: '',
+              endFramePromptZh: '',
+              endFrameHttpUrl: null,
+              endFrameStatus: 'idle' as const,
+              endFrameProgress: 0,
+              endFrameError: null,
+              row: result.row,
+              col: result.col,
+              sourceRect: result.sourceRect,
+              endFrameImageUrl: null,
+              endFrameSource: null,
+              characterIds: [],
+              emotionTags: [],
+              shotSize: null,
+              duration: 5,
+              ambientSound: '',
+              soundEffects: [],
+              soundEffectText: '',
+              dialogue: '',
+              actionSummary: '',
+              cameraMovement: '',
+              imageStatus: 'completed' as const,
+              imageProgress: 100,
+              imageError: null,
+              videoStatus: 'idle' as const,
+              videoProgress: 0,
+              videoUrl: null,
+              videoError: null,
+              videoMediaId: null,
+            } as any);
+          }
+        }
+        
+        setSplitScenes(merged);
+        const syncCount = Math.min(splitResults.length, existingSplitScenes.length);
+        toast.success(`已将 ${syncCount} 张首帧图片同步到分镜，共 ${merged.length} 个场景`);
+      } else {
+        // 没有已有分镜，使用全新的空分镜
+        const splitScenes = splitResults.map((result: SplitResult, index: number) => ({
+          id: index + 1,
+          sceneName: '',
+          sceneLocation: '',
+          imageDataUrl: result.dataUrl,
+          imageHttpUrl: null,
+          width: result.width,
+          height: result.height,
+          imagePrompt: '',
+          imagePromptZh: '',
+          videoPrompt: '',
+          videoPromptZh: `场景 ${index + 1}`,
+          needsEndFrame: false,
+          endFramePrompt: '',
+          endFramePromptZh: '',
+          endFrameHttpUrl: null,
+          endFrameStatus: 'idle' as const,
+          endFrameProgress: 0,
+          endFrameError: null,
+          row: result.row,
+          col: result.col,
+          sourceRect: result.sourceRect,
+          endFrameImageUrl: null,
+          endFrameSource: null,
+          characterIds: [],
+          emotionTags: [],
+          shotSize: null,
+          duration: 5,
+          ambientSound: '',
+          soundEffects: [],
+          soundEffectText: '',
+          dialogue: '',
+          actionSummary: '',
+          cameraMovement: '',
+          imageStatus: 'completed' as const,
+          imageProgress: 100,
+          imageError: null,
+          videoStatus: 'idle' as const,
+          videoProgress: 0,
+          videoUrl: null,
+          videoError: null,
+          videoMediaId: null,
+        }));
+        setSplitScenes(splitScenes);
+        toast.success(`成功切割为 ${splitScenes.length} 个场景`);
+      }
       setStoryboardStatus('editing');
-      toast.success(`成功切割为 ${splitScenes.length} 个场景`);
       onSplitComplete?.();
     } catch (error) {
       const err = error as Error;
