@@ -1217,8 +1217,9 @@ ipcMain.handle('save-file-dialog', async (_event, { localPath, defaultPath, filt
  * - Production: {resourcesPath}/demo-data/
  */
 function getDemoDataPath(): string {
-  if (VITE_DEV_SERVER_URL) {
-    return path.join(process.env.APP_ROOT!, 'demo-data')
+  if (!app.isPackaged) {
+    const appRoot = process.env.APP_ROOT || path.join(__dirname, '../..')
+    return path.join(appRoot, 'demo-data')
   }
   return path.join(process.resourcesPath, 'demo-data')
 }
@@ -1232,41 +1233,51 @@ function copyDirSync(src: string, dest: string) {
 }
 
 /**
- * Seed demo project data on first run.
- * Checks if moyin-project-store.json exists in the project data root.
- * If not, copies demo data (JSON + media) to the user's storage directory.
+ * Seed demo project exactly once.
+ * Default behavior: demo is included on first startup.
+ * If the user later deletes the demo project, we do NOT auto-add it back.
  */
 function seedDemoProject() {
   const projectDataRoot = getProjectDataRoot()
-  const marker = path.join(projectDataRoot, 'mumu-project-store.json')
-  const legacyMarker = path.join(projectDataRoot, 'moyin-project-store.json')
+  const seedMarkerPath = path.join(projectDataRoot, '_meta', 'demo-seeded.json')
+  const projectStoreCandidates = ['mumu-project-store.json', 'moyin-project-store.json']
+  const characterStoreCandidates = ['mumu-character-library.json', 'moyin-character-library.json']
 
-  const ensureDemoStoreCompatibility = () => {
-    // Demo package still contains legacy moyin-* filenames.
-    // Keep both files for backward compatibility, but always ensure mumu-* exists.
-    const legacyProjectStore = path.join(projectDataRoot, 'moyin-project-store.json')
-    const currentProjectStore = path.join(projectDataRoot, 'mumu-project-store.json')
-    if (!fs.existsSync(currentProjectStore) && fs.existsSync(legacyProjectStore)) {
-      fs.copyFileSync(legacyProjectStore, currentProjectStore)
-      console.log('[Seed] Migrated demo store file: moyin-project-store.json -> mumu-project-store.json')
+  const getFirstExistingPath = (baseDir: string, names: string[]): string | null => {
+    for (const name of names) {
+      const fullPath = path.join(baseDir, name)
+      if (fs.existsSync(fullPath)) return fullPath
     }
+    return null
+  }
 
-    const legacyCharacterStore = path.join(projectDataRoot, 'moyin-character-library.json')
-    const currentCharacterStore = path.join(projectDataRoot, 'mumu-character-library.json')
-    if (!fs.existsSync(currentCharacterStore) && fs.existsSync(legacyCharacterStore)) {
-      fs.copyFileSync(legacyCharacterStore, currentCharacterStore)
-      console.log('[Seed] Migrated demo store file: moyin-character-library.json -> mumu-character-library.json')
+  const writeCompatProjectStores = (payload: string) => {
+    for (const name of projectStoreCandidates) {
+      fs.writeFileSync(path.join(projectDataRoot, name), payload, 'utf-8')
     }
   }
 
-  if (fs.existsSync(marker)) {
-    // Already initialized with current naming.
-    return
+  const ensureCharacterStoreCompatibility = (sourceRoot: string) => {
+    const sourcePath = getFirstExistingPath(sourceRoot, characterStoreCandidates)
+    if (!sourcePath) return
+    for (const name of characterStoreCandidates) {
+      const targetPath = path.join(projectDataRoot, name)
+      if (!fs.existsSync(targetPath)) {
+        fs.copyFileSync(sourcePath, targetPath)
+      }
+    }
   }
 
-  if (fs.existsSync(legacyMarker)) {
-    // Existing legacy data: create current-compatible filenames and return.
-    ensureDemoStoreCompatibility()
+  const writeSeedMarker = () => {
+    ensureDir(path.dirname(seedMarkerPath))
+    fs.writeFileSync(
+      seedMarkerPath,
+      JSON.stringify({ seededAt: new Date().toISOString(), version: 1 }, null, 2),
+      'utf-8'
+    )
+  }
+
+  if (fs.existsSync(seedMarkerPath)) {
     return
   }
 
@@ -1279,15 +1290,80 @@ function seedDemoProject() {
     return
   }
 
-  console.log('[Seed] First run detected — seeding demo project...')
+  const demoProjectStorePath = getFirstExistingPath(demoProjects, projectStoreCandidates)
+  if (!demoProjectStorePath) {
+    console.warn('[Seed] Demo project store file not found:', demoProjects)
+    return
+  }
 
   try {
-    // Copy project JSON files
-    copyDirSync(demoProjects, projectDataRoot)
-    console.log('[Seed] Copied project data to:', projectDataRoot)
+    type ProjectEntry = {
+      id: string
+      [key: string]: unknown
+    }
+    type ProjectIndexState = {
+      projects?: ProjectEntry[]
+      activeProjectId?: string | null
+      [key: string]: unknown
+    }
+    type ProjectIndexStore = {
+      state?: ProjectIndexState
+      version?: number
+    } & ProjectIndexState
 
-    // Ensure copied demo files match current store keys.
-    ensureDemoStoreCompatibility()
+    const demoStoreRaw = fs.readFileSync(demoProjectStorePath, 'utf-8')
+    const demoStore = JSON.parse(demoStoreRaw) as ProjectIndexStore
+    const demoState = (demoStore.state || demoStore) as ProjectIndexState
+    const demoProjectList = Array.isArray(demoState.projects) ? demoState.projects : []
+
+    const currentStorePath = getFirstExistingPath(projectDataRoot, projectStoreCandidates)
+    let currentStore: ProjectIndexStore = { state: { projects: [], activeProjectId: null }, version: 0 }
+    if (currentStorePath) {
+      currentStore = JSON.parse(fs.readFileSync(currentStorePath, 'utf-8')) as ProjectIndexStore
+    }
+    const currentState = (currentStore.state || currentStore) as ProjectIndexState
+    const currentProjects = Array.isArray(currentState.projects) ? currentState.projects : []
+    const seenIds = new Set<string>(currentProjects.map((p) => p.id))
+    let addedCount = 0
+
+    for (const demoProject of demoProjectList) {
+      if (!seenIds.has(demoProject.id)) {
+        currentProjects.push(demoProject)
+        seenIds.add(demoProject.id)
+        addedCount++
+      }
+    }
+
+    const mergedStore = {
+      state: {
+        ...currentState,
+        projects: currentProjects,
+        activeProjectId: currentState.activeProjectId || demoState.activeProjectId || currentProjects[0]?.id || null,
+      },
+      version: typeof currentStore.version === 'number' ? currentStore.version : (demoStore.version ?? 0),
+    }
+    writeCompatProjectStores(JSON.stringify(mergedStore))
+    ensureCharacterStoreCompatibility(demoProjects)
+
+    // Copy per-project and shared demo data if missing
+    for (const demoProject of demoProjectList) {
+      const srcProjectDir = path.join(demoProjects, '_p', demoProject.id)
+      const dstProjectDir = path.join(projectDataRoot, '_p', demoProject.id)
+      if (fs.existsSync(srcProjectDir) && !fs.existsSync(dstProjectDir)) {
+        copyDirSync(srcProjectDir, dstProjectDir)
+      }
+    }
+
+    const demoSharedDir = path.join(demoProjects, '_shared')
+    const targetSharedDir = path.join(projectDataRoot, '_shared')
+    if (fs.existsSync(demoSharedDir)) {
+      ensureDir(targetSharedDir)
+      for (const name of fs.readdirSync(demoSharedDir)) {
+        const src = path.join(demoSharedDir, name)
+        const dst = path.join(targetSharedDir, name)
+        if (!fs.existsSync(dst)) fs.copyFileSync(src, dst)
+      }
+    }
 
     // Copy media files
     if (fs.existsSync(demoMedia)) {
@@ -1296,7 +1372,8 @@ function seedDemoProject() {
       console.log('[Seed] Copied media files to:', mediaRoot)
     }
 
-    console.log('[Seed] Demo project seeded successfully.')
+    writeSeedMarker()
+    console.log(`[Seed] Demo project ensured successfully. Added ${addedCount} project(s).`)
   } catch (error) {
     console.error('[Seed] Failed to seed demo project:', error)
   }
