@@ -629,7 +629,7 @@ export const useMediaStore = create<MediaStore>()(
   },
     }),
     {
-      name: 'moyin-media-store',
+      name: 'mumu-media-store',
       storage: createJSONStorage(() => createSplitStorage<MediaPersistedState>(
         'media', splitMediaData, mergeMediaData, 'shareMedia'
       )),

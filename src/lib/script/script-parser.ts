@@ -924,8 +924,86 @@ ${styleId ? `- 视觉风格：${styleId}` : ''}
   const response = await callChatAPI(systemPrompt, userPrompt, extendedOptions);
   
   console.log('[generateScriptFromIdea] 生成剧本长度:', response.length);
-  
-  return response;
+
+  // 测试模式或部分模型可能返回结构化 JSON，这里自动转成可导入剧本文本，避免导入流程异常。
+  return coerceScriptTextFromStructuredResponse(response);
+}
+
+function normalizeScriptTimeForHeader(value: unknown): string {
+  const raw = String(value || '').toLowerCase();
+  if (raw.includes('night') || raw.includes('夜')) return '夜';
+  if (raw.includes('morning') || raw.includes('晨')) return '晨';
+  if (raw.includes('dawn') || raw.includes('黎明')) return '黎明';
+  if (raw.includes('dusk') || raw.includes('黄昏') || raw.includes('evening')) return '黄昏';
+  return '日';
+}
+
+function coerceScriptTextFromStructuredResponse(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{')) return text;
+
+  try {
+    const parsed = JSON.parse(trimmed) as {
+      title?: string;
+      logline?: string;
+      outline?: string;
+      characters?: Array<{ name?: string; personality?: string }>;
+      episodes?: Array<{ id?: string; index?: number; title?: string; sceneIds?: string[] }>;
+      scenes?: Array<{ id?: string; episodeId?: string; name?: string; location?: string; time?: string; visualPrompt?: string; notes?: string }>;
+    };
+
+    const scenes = Array.isArray(parsed.scenes) ? parsed.scenes : [];
+    if (scenes.length === 0) return text;
+
+    const episodes = Array.isArray(parsed.episodes) && parsed.episodes.length > 0
+      ? parsed.episodes
+      : [{ id: 'ep_1', index: 1, title: '第1集', sceneIds: scenes.map((s) => s.id || '') }];
+    const chars = Array.isArray(parsed.characters) ? parsed.characters : [];
+
+    const lines: string[] = [];
+    lines.push(`《${parsed.title || '测试模式剧本'}》`);
+    lines.push('');
+    lines.push('**大纲：**');
+    lines.push(parsed.logline || parsed.outline || '这是自动转换的测试剧本文本，用于验证导入流程。');
+    lines.push('');
+    lines.push('**人物小传：**');
+    if (chars.length === 0) {
+      lines.push('测试角色：用于流程验证。');
+    } else {
+      for (const ch of chars) {
+        lines.push(`${ch.name || '未命名角色'}：${ch.personality || '用于流程验证。'}`);
+      }
+    }
+    lines.push('');
+
+    for (const ep of episodes) {
+      const epIndex = ep.index || 1;
+      const epTitle = ep.title || `第${epIndex}集`;
+      lines.push(`**第${epIndex}集：${epTitle.replace(/^第\d+集[:：]?/, '').trim() || `第${epIndex}集`}**`);
+      lines.push('');
+
+      const episodeScenes = scenes.filter((s) => {
+        if (ep.id && s.episodeId) return s.episodeId === ep.id;
+        if (Array.isArray(ep.sceneIds) && ep.sceneIds.length > 0 && s.id) return ep.sceneIds.includes(s.id);
+        return true;
+      });
+      const useScenes = episodeScenes.length > 0 ? episodeScenes : scenes;
+
+      useScenes.forEach((scene, idx) => {
+        const location = scene.location || scene.name || '测试地点';
+        const time = normalizeScriptTimeForHeader(scene.time);
+        lines.push(`**${epIndex}-${idx + 1} ${time} 内 ${location}**`);
+        lines.push(`人物：${chars[0]?.name || '测试角色'}`);
+        lines.push(`△${scene.notes || scene.visualPrompt || `${location}内进行测试流程。`}`);
+        lines.push(`${chars[0]?.name || '测试角色'}：（平静）流程继续，确认当前步骤结果。`);
+        lines.push('');
+      });
+    }
+
+    return lines.join('\n').trim();
+  } catch {
+    return text;
+  }
 }
 
 /**

@@ -292,7 +292,7 @@ export const useSceneStore = create<SceneStore>()(
       reset: () => set(initialState),
     }),
     {
-      name: 'moyin-scene-store',
+      name: 'mumu-scene-store',
       storage: createJSONStorage(() => createSplitStorage<ScenePersistedState>(
         'scenes', splitSceneData, mergeSceneData, 'shareScenes'
       )),

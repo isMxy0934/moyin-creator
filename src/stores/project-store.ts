@@ -27,7 +27,7 @@ interface ProjectStore {
 // Default project for desktop app
 const DEFAULT_PROJECT: Project = {
   id: "default-project",
-  name: "魔因漫创项目",
+  name: "MUMU项目",
   createdAt: Date.now(),
   updatedAt: Date.now(),
 };
@@ -114,7 +114,7 @@ export const useProjectStore = create<ProjectStore>()(
       },
     }),
     {
-      name: "moyin-project-store",
+      name: "mumu-project-store",
       storage: createJSONStorage(() => fileStorage),
       partialize: (state) => ({
         projects: state.projects,

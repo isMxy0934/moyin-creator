@@ -1,23 +1,23 @@
 {
-  "name": "moyin-creator",
-  "productName": "魔因漫创",
+  "name": "mumu-creator",
+  "productName": "MUMU",
   "version": "0.1.1",
   "description": "AI 驱动的动漫/短剧分镜创作工具",
   "author": "MemeCalculate",
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "https://github.com/MemeCalculate/moyin-creator.git"
+    "url": "https://github.com/MemeCalculate/mumu-creator.git"
   },
-  "homepage": "https://github.com/MemeCalculate/moyin-creator",
+  "homepage": "https://github.com/MemeCalculate/mumu-creator",
   "bugs": {
-    "url": "https://github.com/MemeCalculate/moyin-creator/issues"
+    "url": "https://github.com/MemeCalculate/mumu-creator/issues"
   },
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build && electron-builder --win",
-    "prebuild": "powershell -Command \"Stop-Process -Name 'moyin-creator' -ErrorAction SilentlyContinue; Stop-Process -Name '魔因漫创' -ErrorAction SilentlyContinue; Stop-Process -Name 'moyin-creator-*-setup' -ErrorAction SilentlyContinue; if (Test-Path release) { Remove-Item -Recurse -Force release -ErrorAction SilentlyContinue }\"",
+    "prebuild": "powershell -Command \"Stop-Process -Name 'mumu-creator' -ErrorAction SilentlyContinue; Stop-Process -Name 'MUMU' -ErrorAction SilentlyContinue; Stop-Process -Name 'mumu-creator-*-setup' -ErrorAction SilentlyContinue; if (Test-Path release) { Remove-Item -Recurse -Force release -ErrorAction SilentlyContinue }\"",
     "build:win": "electron-vite build && electron-builder --win",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "electron-vite preview"

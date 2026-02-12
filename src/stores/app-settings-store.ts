@@ -80,7 +80,7 @@ export const useAppSettingsStore = create<AppSettingsState & AppSettingsActions>
         })),
     }),
     {
-      name: "moyin-app-settings",
+      name: "mumu-app-settings",
       storage: createJSONStorage(() => fileStorage),
     }
   )

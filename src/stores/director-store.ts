@@ -1732,7 +1732,7 @@ export const useDirectorStore = create<DirectorStore>()(
   },
     }),
     {
-      name: 'moyin-director-store',
+      name: 'mumu-director-store',
       storage: createJSONStorage(() => createProjectScopedStorage('director')),
       partialize: (state) => {
         // Helper: strip base64 data from a string field (keep local-image:// and https://)

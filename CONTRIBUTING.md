@@ -1,6 +1,6 @@
 # 贡献指南 | Contributing Guide
 
-感谢你对 **魔因漫创 (Moyin Creator)** 的关注！欢迎任何形式的贡献。
+感谢你对 **MUMU** 的关注！欢迎任何形式的贡献。
 
 ## 开发环境
 
@@ -14,8 +14,8 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/hotflow2024/moyin-creator.git
-cd moyin-creator
+git clone https://github.com/hotflow2024/mumu-creator.git
+cd mumu-creator
 
 # 安装依赖
 npm install
@@ -27,7 +27,7 @@ npm run dev
 ### 项目结构
 
 ```
-moyin-creator/
+mumu-creator/
 ├── electron/          # Electron 主进程 + Preload
 ├── src/
 │   ├── components/    # React UI 组件
@@ -89,9 +89,9 @@ npx electron-vite build
 
 ## 问题反馈
 
-- 🐛 Bug 报告：[GitHub Issues](https://github.com/hotflow2024/moyin-creator/issues)
-- 💡 功能建议：[GitHub Issues](https://github.com/hotflow2024/moyin-creator/issues)
-- 💬 讨论交流：[GitHub Discussions](https://github.com/hotflow2024/moyin-creator/discussions)
+- 🐛 Bug 报告：[GitHub Issues](https://github.com/hotflow2024/mumu-creator/issues)
+- 💡 功能建议：[GitHub Issues](https://github.com/hotflow2024/mumu-creator/issues)
+- 💬 讨论交流：[GitHub Discussions](https://github.com/hotflow2024/mumu-creator/discussions)
 
 ## 行为准则
 

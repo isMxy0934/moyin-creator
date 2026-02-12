@@ -297,14 +297,35 @@ export async function generateEpisodeShots(
             // 更新场景的视角数据
             const sceneIndex = updatedScenes.findIndex(s => s.id === scene.id);
             if (sceneIndex !== -1) {
-              const viewpointsData = result.viewpoints.map((v: any, idx: number) => ({
-                id: v.id,
-                name: v.name,
-                nameEn: v.nameEn,
-                shotIds: v.shotIndexes.map((si: number) => sceneShots[si - 1]?.id).filter(Boolean),
-                keyProps: v.keyProps,
-                gridIndex: idx,
-              }));
+              const viewpointsData = (result.viewpoints || []).map((v: any, idx: number) => {
+                const shotIndexes = Array.isArray(v?.shotIndexes) ? v.shotIndexes : [];
+                const shotIds = shotIndexes
+                  .map((si: number) => Number(si))
+                  .filter((si: number) => Number.isFinite(si) && si >= 1 && si <= sceneShots.length)
+                  .map((si: number) => sceneShots[si - 1]?.id)
+                  .filter(Boolean);
+                return {
+                  id: v?.id || `viewpoint_${idx + 1}`,
+                  name: v?.name || `视角${idx + 1}`,
+                  nameEn: v?.nameEn || `Viewpoint ${idx + 1}`,
+                  shotIds,
+                  keyProps: Array.isArray(v?.keyProps) ? v.keyProps : [],
+                  gridIndex: idx,
+                };
+              });
+
+              // 兜底：AI 可能返回空 viewpoints，避免后续 shotIds push 时报错
+              if (viewpointsData.length === 0) {
+                console.warn(`[generateEpisodeShots] ⚠️ 场景 "${scene.location}" AI 返回空视角，使用默认视角兜底`);
+                viewpointsData.push({
+                  id: "overview",
+                  name: "全景",
+                  nameEn: "Overview",
+                  shotIds: [],
+                  keyProps: [],
+                  gridIndex: 0,
+                });
+              }
               
               // 检查是否有未分配的分镜，并将它们分配到合适的视角
               const allAssignedShotIds = new Set(viewpointsData.flatMap((v: any) => v.shotIds));
@@ -353,8 +374,9 @@ export async function generateEpisodeShots(
                     bestViewpointIdx = overviewIdx >= 0 ? overviewIdx : 0;
                   }
                   
-                  viewpointsData[bestViewpointIdx].shotIds.push(shot.id);
-                  console.log(`[generateEpisodeShots]   - 分镜 ${shot.id} 分配到视角 "${viewpointsData[bestViewpointIdx].name}" (score: ${bestScore})`);
+                  const targetViewpoint = viewpointsData[bestViewpointIdx] || viewpointsData[0];
+                  targetViewpoint.shotIds.push(shot.id);
+                  console.log(`[generateEpisodeShots]   - 分镜 ${shot.id} 分配到视角 "${targetViewpoint.name}" (score: ${bestScore})`);
                 }
               }
               

@@ -93,7 +93,7 @@ async function resolveRendererEntry():
 
 function createWindow() {
   win = new BrowserWindow({
-    title: '魔因漫创',
+    title: 'MUMU',
     width: 1400,
     height: 900,
     minWidth: 1200,
@@ -847,7 +847,7 @@ ipcMain.handle('storage-export-data', async (_event, targetPath: string) => {
     if (!targetPath) return { success: false, error: '路径不能为空' }
     const exportDir = path.join(
       normalizePath(targetPath),
-      `moyin-data-${new Date().toISOString().replace(/[:.]/g, '-')}`
+      `mumu-data-${new Date().toISOString().replace(/[:.]/g, '-')}`
     )
     
     // Create export structure
@@ -885,7 +885,7 @@ ipcMain.handle('storage-import-data', async (_event, sourcePath: string) => {
     }
     
     // Create temporary backup for rollback
-    const backupDir = path.join(os.tmpdir(), `moyin-backup-${Date.now()}`)
+    const backupDir = path.join(os.tmpdir(), `mumu-backup-${Date.now()}`)
     const currentProjectsDir = getProjectDataRoot()
     const currentMediaDir = getMediaRoot()
     
@@ -990,7 +990,7 @@ ipcMain.handle('storage-export-project-data', async (_event, targetPath: string)
     if (!targetPath) return { success: false, error: '路径不能为空' }
     const exportDir = path.join(
       normalizePath(targetPath),
-      `moyin-data-${new Date().toISOString().replace(/[:.]/g, '-')}`
+      `mumu-data-${new Date().toISOString().replace(/[:.]/g, '-')}`
     )
     ensureDir(path.join(exportDir, 'projects'))
     ensureDir(path.join(exportDir, 'media'))
@@ -1036,7 +1036,7 @@ ipcMain.handle('storage-export-media-data', async (_event, targetPath: string) =
     if (!targetPath) return { success: false, error: '路径不能为空' }
     const exportDir = path.join(
       normalizePath(targetPath),
-      `moyin-data-${new Date().toISOString().replace(/[:.]/g, '-')}`
+      `mumu-data-${new Date().toISOString().replace(/[:.]/g, '-')}`
     )
     ensureDir(path.join(exportDir, 'projects'))
     ensureDir(path.join(exportDir, 'media'))

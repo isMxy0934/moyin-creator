@@ -48,6 +48,76 @@ function extractPromptText(body: unknown): string {
   return textChunks.join("\n");
 }
 
+function buildMockCreativeScriptText(): string {
+  return `《测试模式剧本》
+
+**大纲：**
+这是用于功能完整性测试的示例剧本，围绕“接收任务 -> 执行任务 -> 输出结果”展开。
+
+**人物小传：**
+测试员：冷静、执行力强，负责确认流程是否可用。
+助手：提供信息支持，帮助推进任务。
+
+**第1集：流程验证**
+
+**1-1 日 内 测试控制室**
+人物：测试员、助手
+△测试员查看控制台日志，助手同步任务状态，屏幕上显示“流程初始化完成”。
+测试员：（平静）开始第一轮功能验证。
+
+**1-2 日 外 测试走廊**
+人物：测试员
+△测试员沿走廊快速前进，准备到下一站点确认导出链路是否正常。
+测试员：（坚定）继续下一步，检查导出与回传结果。`;
+}
+
+function buildMockViewpointJson(promptText: string): string {
+  const shotMatches = [...promptText.matchAll(/【分镜(\d+)】/g)];
+  const maxShot = shotMatches.length > 0
+    ? Math.max(...shotMatches.map((m) => Number(m[1]) || 1))
+    : 1;
+  const mid = Math.max(1, Math.ceil(maxShot / 2));
+  return JSON.stringify({
+    viewpoints: [
+      {
+        id: "overview",
+        name: "全景",
+        nameEn: "Overview",
+        description: "展示空间关系",
+        descriptionEn: "Show overall spatial relationship",
+        keyProps: ["主环境"],
+        keyPropsEn: ["main environment"],
+        shotIndexes: [1, mid],
+      },
+      {
+        id: "detail",
+        name: "细节",
+        nameEn: "Detail",
+        description: "突出动作细节",
+        descriptionEn: "Highlight action details",
+        keyProps: ["关键道具"],
+        keyPropsEn: ["key prop"],
+        shotIndexes: [maxShot],
+      },
+    ],
+    analysisNote: "测试模式：已返回稳定视角结构",
+  });
+}
+
+function buildMockSynopsesJson(promptText: string): string {
+  const episodeMatches = [...promptText.matchAll(/第(\d+)集/g)];
+  const indexes = Array.from(new Set(episodeMatches.map((m) => Number(m[1])).filter((n) => Number.isFinite(n) && n > 0)));
+  const targets = indexes.length > 0 ? indexes : [1];
+  const synopses: Record<string, { synopsis: string; keyEvents: string[] }> = {};
+  for (const idx of targets) {
+    synopses[String(idx)] = {
+      synopsis: `第${idx}集测试大纲：角色接收任务、推进流程并完成结果确认。`,
+      keyEvents: ["接收任务", "执行流程", "结果确认"],
+    };
+  }
+  return JSON.stringify({ synopses });
+}
+
 function buildMockChatResponse(promptText: string): Response {
   const normalized = promptText.toLowerCase();
 
@@ -71,6 +141,51 @@ function buildMockChatResponse(promptText: string): Response {
                 },
               },
             ],
+          },
+        },
+      ],
+    });
+  }
+
+  if (
+    promptText.includes("请根据以下创意输入生成完整剧本") ||
+    promptText.includes("生成完整剧本，包含")
+  ) {
+    return jsonResponse({
+      choices: [
+        {
+          message: {
+            content: buildMockCreativeScriptText(),
+          },
+        },
+      ],
+    });
+  }
+
+  if (
+    promptText.includes("分析该场景需要哪些不同的视角") ||
+    (promptText.includes("\"viewpoints\"") && promptText.includes("shotIndexes"))
+  ) {
+    return jsonResponse({
+      choices: [
+        {
+          message: {
+            content: buildMockViewpointJson(promptText),
+          },
+        },
+      ],
+    });
+  }
+
+  if (
+    promptText.includes("请为以下集数生成大纲和关键事件") ||
+    promptText.includes("\"synopses\"")
+  ) {
+    return jsonResponse({
+      choices: [
+        {
+          message: {
+            content: buildMockSynopsesJson(promptText),
           },
         },
       ],

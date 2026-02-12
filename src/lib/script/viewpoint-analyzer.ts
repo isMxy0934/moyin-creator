@@ -178,6 +178,18 @@ ${shotSummaries}
       keyPropsEn: v.keyPropsEn || [],
       shotIndexes: v.shotIndexes || [],
     }));
+
+    if (viewpoints.length === 0) {
+      console.warn('[analyzeSceneViewpoints] ⚠️ AI 返回空 viewpoints，回退默认视角');
+      return {
+        viewpoints: [
+          { id: 'overview', name: '全景', nameEn: 'Overview', description: '整体空间布局', descriptionEn: 'Overall spatial layout', keyProps: [], keyPropsEn: [], shotIndexes: [] },
+          { id: 'medium', name: '中景', nameEn: 'Medium Shot', description: '中景视角', descriptionEn: 'Medium view', keyProps: [], keyPropsEn: [], shotIndexes: [] },
+          { id: 'detail', name: '细节', nameEn: 'Detail', description: '细节特写', descriptionEn: 'Detail close-up', keyProps: [], keyPropsEn: [], shotIndexes: [] },
+        ],
+        analysisNote: parsed.analysisNote || 'AI 返回空视角，使用默认视角',
+      };
+    }
     
     console.log('[analyzeSceneViewpoints] 📦 返回视角:', viewpoints.map((v: any) => v.name).join(', '));
     

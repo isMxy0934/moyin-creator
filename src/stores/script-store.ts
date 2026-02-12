@@ -638,7 +638,7 @@ export const useScriptStore = create<ScriptStore>()(
       },
     }),
     {
-      name: "moyin-script-store",
+      name: "mumu-script-store",
       storage: createJSONStorage(() => createProjectScopedStorage('script')),
       partialize: (state) => {
         const pid = state.activeProjectId;

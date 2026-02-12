@@ -1,5 +1,5 @@
-appId: com.manju2026.moyin-creator
-productName: 魔因漫创
+appId: com.manju2026.mumu-creator
+productName: MUMU
 directories:
   buildResources: build
   output: release
@@ -15,7 +15,7 @@ asarUnpack:
 icon: build/icon.ico
 
 win:
-  executableName: moyin-creator
+  executableName: mumu-creator
   icon: build/icon.ico
   forceCodeSigning: false
   target:
@@ -26,7 +26,7 @@ win:
 # NSIS 安装包配置
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
-  shortcutName: 魔因漫创
+  shortcutName: MUMU
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
   createStartMenuShortcut: true

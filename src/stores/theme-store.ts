@@ -20,7 +20,7 @@ export const useThemeStore = create<ThemeState>()(
       toggleTheme: () => set({ theme: get().theme === "dark" ? "light" : "dark" }),
     }),
     {
-      name: "moyin-theme",
+      name: "mumu-theme",
     }
   )
 );

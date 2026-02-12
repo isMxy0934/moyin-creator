@@ -443,7 +443,7 @@ export const useCharacterLibraryStore = create<CharacterLibraryStore>()(
       reset: () => set(initialState),
     }),
     {
-      name: 'moyin-character-library',
+      name: 'mumu-character-library',
       storage: createJSONStorage(() => createSplitStorage<CharPersistedState>(
         'characters', splitCharData, mergeCharData, 'shareCharacters'
       )),
@@ -480,7 +480,7 @@ export const useCharacterLibraryStore = create<CharacterLibraryStore>()(
           console.log(`Character library loaded: ${state.characters?.length || 0} characters`);
         }
         // Migrate old data from localStorage to IndexedDB
-        migrateFromLocalStorage('moyin-character-library');
+        migrateFromLocalStorage('mumu-character-library');
       },
     }
   )

@@ -391,13 +391,13 @@ export function SettingsPanel() {
     if (result.success) {
       // 清除 localStorage 中的缓存，防止旧数据覆盖导入的数据
       const keysToRemove = Object.keys(localStorage).filter(key => 
-        key.startsWith('moyin-') || key.includes('store')
+        key.startsWith('mumu-') || key.includes('store')
       );
       keysToRemove.forEach(key => localStorage.removeItem(key));
       
       // 清除 IndexedDB 缓存
       try {
-        const dbRequest = indexedDB.open('moyin-creator-db', 1);
+        const dbRequest = indexedDB.open('mumu-creator-db', 1);
         dbRequest.onsuccess = () => {
           const db = dbRequest.result;
           if (db.objectStoreNames.contains('zustand-storage')) {
@@ -442,13 +442,13 @@ export function SettingsPanel() {
       
       // 清除 localStorage 中的缓存，确保从新路径加载数据
       const keysToRemove = Object.keys(localStorage).filter(key => 
-        key.startsWith('moyin-') || key.includes('store')
+        key.startsWith('mumu-') || key.includes('store')
       );
       keysToRemove.forEach(key => localStorage.removeItem(key));
       
       // 清除 IndexedDB 缓存
       try {
-        const dbRequest = indexedDB.open('moyin-creator-db', 1);
+        const dbRequest = indexedDB.open('mumu-creator-db', 1);
         dbRequest.onsuccess = () => {
           const db = dbRequest.result;
           if (db.objectStoreNames.contains('zustand-storage')) {
@@ -603,8 +603,9 @@ export function SettingsPanel() {
                         )}
                       >
                         {/* Header */}
-                        <CollapsibleTrigger className="w-full">
-                          <div className="flex items-center justify-between p-4 hover:bg-muted/30 rounded-t-xl transition-colors">
+                        <CollapsibleTrigger asChild>
+                          <div className="w-full">
+                            <div className="flex items-center justify-between p-4 hover:bg-muted/30 rounded-t-xl transition-colors">
                             <div className="flex items-center gap-3">
                               <div
                                 className={cn(
@@ -751,6 +752,7 @@ export function SettingsPanel() {
                                 <ChevronRight className="h-4 w-4 text-muted-foreground" />
                               )}
                             </div>
+                            </div>
                           </div>
                         </CollapsibleTrigger>
 
@@ -872,7 +874,7 @@ export function SettingsPanel() {
 
               {/* About */}
               <div className="text-center py-8 text-muted-foreground border-t border-border">
-                <p className="text-sm font-medium">魔因漫创 Moyin Creator</p>
+                <p className="text-sm font-medium">MUMU</p>
                 <p className="text-xs mt-1">v0.1.0 · AI 驱动的动漫视频创作工具</p>
               </div>
             </div>
@@ -1018,7 +1020,7 @@ export function SettingsPanel() {
 
               {/* About */}
               <div className="text-center py-8 text-muted-foreground border-t border-border">
-                <p className="text-sm font-medium">魔因漫创 Moyin Creator</p>
+                <p className="text-sm font-medium">MUMU</p>
                 <p className="text-xs mt-1">v0.1.0 · AI 驱动的动漫视频创作工具</p>
               </div>
             </div>
@@ -1132,7 +1134,7 @@ export function SettingsPanel() {
 
               {/* About */}
               <div className="text-center py-8 text-muted-foreground border-t border-border">
-                <p className="text-sm font-medium">魔因漫创 Moyin Creator</p>
+                <p className="text-sm font-medium">MUMU</p>
                 <p className="text-xs mt-1">v0.1.0 · AI 驱动的动漫视频创作工具</p>
               </div>
             </div>
@@ -1340,7 +1342,7 @@ export function SettingsPanel() {
 
               {/* About */}
               <div className="text-center py-8 text-muted-foreground border-t border-border">
-                <p className="text-sm font-medium">魔因漫创 Moyin Creator</p>
+                <p className="text-sm font-medium">MUMU</p>
                 <p className="text-xs mt-1">v0.1.0 · AI 驱动的动漫视频创作工具</p>
               </div>
             </div>

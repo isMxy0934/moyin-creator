@@ -19,7 +19,7 @@ interface MasterExportProgress {
 }
 
 function sanitizeFilename(name: string): string {
-  return name.replace(/[\\/:*?"<>|]/g, "_").trim() || "moyin_project";
+  return name.replace(/[\\/:*?"<>|]/g, "_").trim() || "mumu_project";
 }
 
 function triggerDownload(blob: Blob, filename: string): void {
